@@ -6,44 +6,15 @@
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include "projection.hpp"
+#include "header.hpp"
+#include "serial.hpp"
 
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s -o out.count [-z zoom] [in.csv ...]\n", argv[0]);
 }
 
-#define HEADER_SIZE 16
-void write_header(FILE *fp) {
-	//          "0123456789ABCDEF"
-	fprintf(fp, "tile-count ver 1");
-}
-
-struct index {
-	unsigned long long index;
-	unsigned long long count;
-};
-
 int indexcmp(const void *p1, const void *p2) {
 	return memcmp(p1, p2, 8);
-}
-
-void write64(FILE *out, unsigned long long v) {
-	// Big-endian so memcmp() sorts numerically
-	for (ssize_t i = 64 - 8; i >= 0; i -= 8) {
-		if (putc((v >> i) & 0xFF, out) == EOF) {
-			perror("write data\n");
-			exit(EXIT_FAILURE);
-		}
-	}
-}
-
-unsigned long long read64(unsigned char *c) {
-	unsigned long long out = 0;
-
-	for (ssize_t i = 0; i < 8; i++) {
-		out = (out << 8) | c[i];
-	}
-
-	return out;
 }
 
 void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzoom) {
@@ -117,9 +88,19 @@ void merge(struct merge *merges, int nmerges, unsigned char *map, FILE *f, int b
 	unsigned long long current_count = 0;
 
 	while (head != NULL) {
-		if (memcmp(map + head->start, current_index, 8) != 0) {
+		int cmp = memcmp(map + head->start, current_index, 8);
+
+		if (cmp < 0) {
+			perror("internal error: file out of order\n");
+			exit(EXIT_FAILURE);
+		}
+
+		if (cmp != 0) {
 			if (current_count != 0) {
-				fwrite(current_index, 1, 8, f);
+				if (fwrite(current_index, 8, 1, f) != 1) {
+					perror("fwrite in merging");
+					exit(EXIT_FAILURE);
+				}
 				write64(f, current_count);
 			}
 
@@ -141,13 +122,16 @@ void merge(struct merge *merges, int nmerges, unsigned char *map, FILE *f, int b
 		along++;
 		long long report = 100 * along / nrec;
 		if (report != reported) {
-			fprintf(stderr, "Merging: %lld%%\r", report);
+			fprintf(stderr, "Merging: %lld%%     \r", report);
 			reported = report;
 		}
 	}
 
 	if (current_count != 0) {
-		fwrite(current_index, 1, 8, f);
+		if (fwrite(current_index, 8, 1, f) != 1) {
+			perror("fwrite in merging");
+			exit(EXIT_FAILURE);
+		}
 		write64(f, current_count);
 	}
 }
@@ -178,7 +162,7 @@ void sort_and_merge(int fd, FILE *out) {
 			end = to_sort;
 		}
 
-		fprintf(stderr, "Sorting part %lld of %d\r", start / unit + 1, nmerges);
+		fprintf(stderr, "Sorting part %lld of %d     \r", start / unit + 1, nmerges);
 
 		merges[start / unit].start = start;
 		merges[start / unit].end = end;
@@ -213,7 +197,11 @@ void sort_and_merge(int fd, FILE *out) {
 		exit(EXIT_FAILURE);
 	}
 
-	write_header(out);
+	if (fwrite(header_text, HEADER_LEN, 1, out) != 1) {
+		perror("write header");
+		exit(EXIT_FAILURE);
+	}
+
 	merge(merges, nmerges, (unsigned char *) map, out, bytes, to_sort / bytes);
 	munmap(map, st.st_size);
 }

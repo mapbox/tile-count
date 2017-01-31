@@ -35,7 +35,7 @@ duplicated between the two.
 Decoding counts
 ---------------
 
-    tile-count-decode in.count
+    tile-count-decode in.count ...
 
 Outputs the `lon,lat,count` CSV that would recreate `in.count`.
 

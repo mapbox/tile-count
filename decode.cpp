@@ -1,0 +1,64 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include "projection.hpp"
+#include "header.hpp"
+#include "serial.hpp"
+
+void usage(char **argv) {
+	fprintf(stderr, "Usage: %s file.count ...\n", argv[0]);
+}
+
+int main(int argc, char **argv) {
+	extern int optind;
+	extern char *optarg;
+
+	int i;
+	while ((i = getopt(argc, argv, "")) != -1) {
+		switch (i) {
+		default:
+			usage(argv);
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	if (optind == argc) {
+		usage(argv);
+		exit(EXIT_FAILURE);
+	}
+
+	for (; optind < argc; optind++) {
+		FILE *f = fopen(argv[optind], "rb");
+		if (f == NULL) {
+			perror(optind[argv]);
+			exit(EXIT_FAILURE);
+		}
+
+		char header[HEADER_LEN];
+		if (fread(header, HEADER_LEN, 1, f) != 1) {
+			perror("read header");
+			exit(EXIT_FAILURE);
+		}
+
+		if (memcmp(header, header_text, HEADER_LEN) != 0) {
+			fprintf(stderr, "%s: not a tile-count file\n", argv[optind]);
+			exit(EXIT_FAILURE);
+		}
+
+		unsigned char buf[16];
+		while (fread(buf, 16, 1, f) == 1) {
+			unsigned long long index = read64(buf);
+			unsigned long long count = read64(buf + 8);
+
+			unsigned x, y;
+			decode(index, &x, &y);
+
+			double lon, lat;
+			projection->unproject(x, y, 32, &lon, &lat);
+			printf("%f,%f,%llu\n", lon, lat, count);
+		}
+
+		fclose(f);
+	}
+}
