@@ -19,7 +19,8 @@ or
 
     lon,lat,count
 
-The input is first streamed into the internal format specified below and then
+The input is first streamed into the internal format specified below (minus the header)
+and then
 sorted and merged into the same format in quadkey order, with adjacent duplicates
 summed.
 
