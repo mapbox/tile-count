@@ -1,15 +1,15 @@
-tile-bin
-========
+tile-count
+==========
 
 A tool for accumulating point counts by tile.
 
-Creating a bin
---------------
+Creating a count
+----------------
 
-    tile-bin-create -z zoom -o out.bin [file.csv]
+    tile-count-create [-z zoom] -o out.count [file.csv ...]
 
 The `-z` option specifies the maximum precision of the data, so that duplicates
-can be pre-summed to make the data file smaller.
+beyond this precision can be pre-summed to make the data file smaller.
 
 The input CSV is a list of records in the form:
 
@@ -23,25 +23,25 @@ The input is first streamed into the internal format specified below and then
 sorted and merged into the same format in quadkey order, with adjacent duplicates
 summed.
 
-Merging bins
-------------
+Merging counts
+--------------
 
-    tile-bin-merge -o out.bin in1.bin [in2.bin ...]
+    tile-count-merge -o out.count in1.count [in2.count ...]
 
-Produces a new bin from the specified bins, summing the counts for any points
+Produces a new count file from the specified count files, summing the counts for any points
 duplicated between the two.
 
-Decoding bins
--------------
+Decoding counts
+---------------
 
-    tile-bin-decode in.bin
+    tile-count-decode in.count
 
-Outputs the `lon,lat,count` CSV that would recreate `in.bin`.
+Outputs the `lon,lat,count` CSV that would recreate `in.count`.
 
 Tiling
 ------
 
-    tile-bin-tile -o out.mbtiles -z zoom in.bin
+    tile-count-tile -o out.mbtiles -z zoom in.count
 
 The _zoom_ is the size of the bins, not the maximum zoom of the tileset,
 so for instance a `-z24` run would produce tiles of zooms 0 through 16.
@@ -51,7 +51,7 @@ indicating how many original points were accumulated into that binned point.
 Internal file format
 --------------------
 
-The `.bin` files contain a magic number for versioning and identification
+The `.count` files contain a header for versioning and identification
 followed (currently) by a simple list of 128-bit records containing:
 
    * 64-bit location quadkey
