@@ -19,7 +19,7 @@ else
 	FINAL_FLAGS := -g $(WARNING_FLAGS) $(DEBUG_FLAGS)
 endif
 
-all: tile-count-create tile-count-decode
+all: tile-count-create tile-count-decode tile-count-tile
 
 PG=
 
@@ -33,6 +33,9 @@ tile-count-create: projection.o create.o header.o serial.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
 tile-count-decode: projection.o decode.o header.o serial.o
+	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
+
+tile-count-tile: projection.o tile.o header.o serial.o mbtiles.o mvt.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
 -include $(wildcard *.d)

@@ -45,7 +45,7 @@ Tiling
     tile-count-tile -o out.mbtiles -z zoom in.count
 
 The _zoom_ is the size of the bins, not the maximum zoom of the tileset,
-so for instance a `-z24` run would produce tiles of zooms 0 through 16.
+so for instance a `-z24` run would produce tiles of zooms 0 through 17.
 The features in the `mbtiles` are a grid of points with a `count` attribute
 indicating how many original points were accumulated into that binned point.
 
