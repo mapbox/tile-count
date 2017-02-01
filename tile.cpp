@@ -44,7 +44,7 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail) {
 			if (count != 0) {
 				mvt_feature feature;
 				feature.type = mvt_point;
-				feature.geometry.push_back(mvt_geometry(mvt_moveto, x >> (12 - detail), y >> (12 - detail)));
+				feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
 
 				mvt_value val;
 				val.type = mvt_uint;
@@ -184,5 +184,20 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;  // XXX
+
+	type_and_string tas;
+	tas.type = VT_NUMBER;
+	tas.string = "count";
+
+	layermap_entry lme(0);
+	lme.file_keys.insert(tas);
+	lme.minzoom = 0;
+	lme.maxzoom = zooms - 1;
+
+	std::map<std::string, layermap_entry> lm;
+	lm.insert(std::pair<std::string, layermap_entry>("count", lme));
+
+	mbtiles_write_metadata(outdb, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm);
 	mbtiles_close(outdb, argv);
 }
