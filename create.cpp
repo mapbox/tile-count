@@ -51,6 +51,13 @@ void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzo
 		y &= mask;
 		unsigned long long index = encode(x, y);
 
+		while (count > MAX_COUNT) {
+			write64(out, index);
+			write32(out, MAX_COUNT);
+
+			count -= MAX_COUNT;
+		}
+
 		write64(out, index);
 		write32(out, count);
 	}
@@ -89,13 +96,14 @@ void merge(struct merge *merges, int nmerges, unsigned char *map, FILE *f, int b
 
 	while (head != NULL) {
 		int cmp = memcmp(map + head->start, current_index, INDEX_BYTES);
+		unsigned long long count = read32(map + head->start + INDEX_BYTES);
 
 		if (cmp < 0) {
 			perror("internal error: file out of order\n");
 			exit(EXIT_FAILURE);
 		}
 
-		if (cmp != 0) {
+		if (cmp != 0 || current_count + count > MAX_COUNT) {
 			if (current_count != 0) {
 				if (fwrite(current_index, INDEX_BYTES, 1, f) != 1) {
 					perror("fwrite in merging");
@@ -107,7 +115,7 @@ void merge(struct merge *merges, int nmerges, unsigned char *map, FILE *f, int b
 			memcpy(current_index, map + head->start, INDEX_BYTES);
 			current_count = 0;
 		}
-		current_count += read32(map + head->start + INDEX_BYTES);
+		current_count += count;
 
 		head->start += bytes;
 
