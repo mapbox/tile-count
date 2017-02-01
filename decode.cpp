@@ -46,10 +46,10 @@ int main(int argc, char **argv) {
 			exit(EXIT_FAILURE);
 		}
 
-		unsigned char buf[16];
-		while (fread(buf, 16, 1, f) == 1) {
+		unsigned char buf[RECORD_BYTES];
+		while (fread(buf, RECORD_BYTES, 1, f) == 1) {
 			unsigned long long index = read64(buf);
-			unsigned long long count = read64(buf + 8);
+			unsigned long long count = read32(buf + INDEX_BYTES);
 
 			unsigned x, y;
 			decode(index, &x, &y);

@@ -140,7 +140,7 @@ int main(int argc, char **argv) {
 			perror(optind[argv]);
 			exit(EXIT_FAILURE);
 		}
-		long long records = (st.st_size - HEADER_LEN) / 16;
+		long long records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
 
 		FILE *f = fopen(argv[optind], "rb");
 		if (f == NULL) {
@@ -159,14 +159,14 @@ int main(int argc, char **argv) {
 			exit(EXIT_FAILURE);
 		}
 
-		unsigned char buf[16];
+		unsigned char buf[RECORD_BYTES];
 		long long seq = 0;
 		long long percent = -1;
 		long long max = 0;
 
-		while (fread(buf, 16, 1, f) == 1) {
+		while (fread(buf, RECORD_BYTES, 1, f) == 1) {
 			unsigned long long index = read64(buf);
-			unsigned long long count = read64(buf + 8);
+			unsigned long long count = read32(buf + INDEX_BYTES);
 			seq++;
 
 			long long npercent = 100 * seq / records;

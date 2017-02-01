@@ -14,7 +14,7 @@ void usage(char **argv) {
 }
 
 int indexcmp(const void *p1, const void *p2) {
-	return memcmp(p1, p2, 8);
+	return memcmp(p1, p2, INDEX_BYTES);
 }
 
 void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzoom) {
@@ -52,7 +52,7 @@ void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzo
 		unsigned long long index = encode(x, y);
 
 		write64(out, index);
-		write64(out, count);
+		write32(out, count);
 	}
 }
 
@@ -84,11 +84,11 @@ void merge(struct merge *merges, int nmerges, unsigned char *map, FILE *f, int b
 		}
 	}
 
-	unsigned char current_index[8] = {0};
+	unsigned char current_index[INDEX_BYTES] = {0};
 	unsigned long long current_count = 0;
 
 	while (head != NULL) {
-		int cmp = memcmp(map + head->start, current_index, 8);
+		int cmp = memcmp(map + head->start, current_index, INDEX_BYTES);
 
 		if (cmp < 0) {
 			perror("internal error: file out of order\n");
@@ -97,17 +97,17 @@ void merge(struct merge *merges, int nmerges, unsigned char *map, FILE *f, int b
 
 		if (cmp != 0) {
 			if (current_count != 0) {
-				if (fwrite(current_index, 8, 1, f) != 1) {
+				if (fwrite(current_index, INDEX_BYTES, 1, f) != 1) {
 					perror("fwrite in merging");
 					exit(EXIT_FAILURE);
 				}
-				write64(f, current_count);
+				write32(f, current_count);
 			}
 
-			memcpy(current_index, map + head->start, 8);
+			memcpy(current_index, map + head->start, INDEX_BYTES);
 			current_count = 0;
 		}
-		current_count += read64(map + head->start + 8);
+		current_count += read32(map + head->start + INDEX_BYTES);
 
 		head->start += bytes;
 
@@ -128,11 +128,11 @@ void merge(struct merge *merges, int nmerges, unsigned char *map, FILE *f, int b
 	}
 
 	if (current_count != 0) {
-		if (fwrite(current_index, 8, 1, f) != 1) {
+		if (fwrite(current_index, INDEX_BYTES, 1, f) != 1) {
 			perror("fwrite in merging");
 			exit(EXIT_FAILURE);
 		}
-		write64(f, current_count);
+		write32(f, current_count);
 	}
 }
 
@@ -144,7 +144,7 @@ void sort_and_merge(int fd, FILE *out) {
 	}
 
 	long long to_sort = st.st_size;
-	int bytes = 16;  // 8 of index, 8 of count
+	int bytes = RECORD_BYTES;
 
 	int page = sysconf(_SC_PAGESIZE);
 	long long unit = (50 * 1024 * 1024 / bytes) * bytes;

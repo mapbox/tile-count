@@ -1,3 +1,3 @@
 #include "header.hpp"
 
-const char header_text[HEADER_LEN] = "tile-count v1  ";  // and implicit null
+const char header_text[HEADER_LEN] = "tile-count v2  ";  // and implicit null
