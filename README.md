@@ -42,12 +42,16 @@ Outputs the `lon,lat,count` CSV that would recreate `in.count`.
 Tiling
 ------
 
-    tile-count-tile -o out.mbtiles -z zoom in.count
+    tile-count-tile [-fs] -o out.mbtiles -z zoom in.count
 
 The _zoom_ is the size of the bins, not the maximum zoom of the tileset,
 so for instance a `-z24` run would produce tiles of zooms 0 through 17.
 The features in the `mbtiles` are a grid of points with a `count` attribute
 indicating how many original points were accumulated into that binned point.
+
+The `-s` option generates square polygon bins instead of points.
+
+The `-f` option deletes any existing file named `out.mbtiles`.
 
 Internal file format
 --------------------

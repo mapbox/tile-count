@@ -15,7 +15,7 @@
 #include "mbtiles.hpp"
 
 void usage(char **argv) {
-	fprintf(stderr, "Usage: %s -z zoom -o out.mbtiles file.count\n", argv[0]);
+	fprintf(stderr, "Usage: %s [-fs] -z zoom -o out.mbtiles file.count\n", argv[0]);
 }
 
 struct tile {
@@ -32,7 +32,7 @@ struct tile {
 	}
 };
 
-void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail) {
+void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square) {
 	mvt_layer layer;
 	layer.name = "count";
 	layer.version = 2;
@@ -46,6 +46,14 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail) {
 				mvt_feature feature;
 				feature.type = mvt_point;
 				feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
+
+				if (square) {
+					feature.type = mvt_polygon;
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 0) << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 1) << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 1) << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 0) << (12 - detail)));
+				}
 
 				mvt_value val;
 				val.type = mvt_uint;
@@ -75,12 +83,17 @@ int main(int argc, char **argv) {
 	char *outfile = NULL;
 	int zoom = -1;
 	bool force = false;
+	bool square = false;
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:")) != -1) {
+	while ((i = getopt(argc, argv, "fz:o:s")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
+			break;
+
+		case 's':
+			square = true;
 			break;
 
 		case 'z':
@@ -199,7 +212,7 @@ int main(int argc, char **argv) {
 
 				if (tiles[z].x != tx || tiles[z].y != ty) {
 					if (tiles[z].active) {
-						make_tile(outdb, tiles[z], z, detail);
+						make_tile(outdb, tiles[z], z, detail, square);
 					}
 
 					tiles[z].active = true;
@@ -223,7 +236,7 @@ int main(int argc, char **argv) {
 
 		for (size_t z = 0; z < zooms; z++) {
 			if (tiles[z].active) {
-				make_tile(outdb, tiles[z], z, detail);
+				make_tile(outdb, tiles[z], z, detail, square);
 			}
 		}
 	}
