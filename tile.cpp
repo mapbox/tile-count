@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <sqlite3.h>
+#include <sys/stat.h>
 #include <string>
 #include <vector>
 #include <set>
@@ -106,8 +107,8 @@ int main(int argc, char **argv) {
 	}
 	sqlite3 *outdb = mbtiles_open(outfile, argv, false);
 
-	size_t zooms = zoom - 7;
-	size_t detail = 7;
+	size_t zooms = zoom - 9;
+	size_t detail = 9;
 
 	std::vector<tile> tiles;
 	for (size_t z = 0; z < zooms; z++) {
@@ -115,6 +116,13 @@ int main(int argc, char **argv) {
 	}
 
 	for (; optind < argc; optind++) {
+		struct stat st;
+		if (stat(argv[optind], &st) != 0) {
+			perror(optind[argv]);
+			exit(EXIT_FAILURE);
+		}
+		long long records = (st.st_size - HEADER_LEN) / 16;
+
 		FILE *f = fopen(argv[optind], "rb");
 		if (f == NULL) {
 			perror(optind[argv]);
@@ -133,9 +141,18 @@ int main(int argc, char **argv) {
 		}
 
 		unsigned char buf[16];
+		long long seq = 0;
+		long long percent = -1;
 		while (fread(buf, 16, 1, f) == 1) {
 			unsigned long long index = read64(buf);
 			unsigned long long count = read64(buf + 8);
+			seq++;
+
+			long long npercent = 100 * seq / records;
+			if (npercent != percent) {
+				percent = npercent;
+				fprintf(stderr, "  %lld%%\r", percent);
+			}
 
 			unsigned wx, wy;
 			decode(index, &wx, &wy);
