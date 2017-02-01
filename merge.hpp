@@ -1,7 +1,8 @@
 struct merge {
 	long long start;
 	long long end;
-	unsigned char *map;
+	unsigned char *map;  // used for merge
+	int fd;		     // used for sort
 
 	struct merge *next;
 };

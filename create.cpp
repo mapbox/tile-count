@@ -3,6 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include "tippecanoe/projection.hpp"
@@ -101,7 +102,37 @@ int indexcmp(const void *p1, const void *p2) {
 	return memcmp(p1, p2, INDEX_BYTES);
 }
 
+void *run_sort(void *p) {
+	struct merge *m = (struct merge *) p;
+
+	void *map = mmap(NULL, m->end - m->start, PROT_READ | PROT_WRITE, MAP_PRIVATE, m->fd, m->start);
+	if (map == MAP_FAILED) {
+		perror("mmap (sort)");
+		exit(EXIT_FAILURE);
+	}
+
+	qsort(map, (m->end - m->start) / RECORD_BYTES, RECORD_BYTES, indexcmp);
+
+	// Sorting and then copying avoids the need to
+	// write out intermediate stages of the sort.
+
+	void *map2 = mmap(NULL, m->end - m->start, PROT_READ | PROT_WRITE, MAP_SHARED, m->fd, m->start);
+	if (map2 == MAP_FAILED) {
+		perror("mmap (write)");
+		exit(EXIT_FAILURE);
+	}
+
+	memcpy(map2, map, m->end - m->start);
+
+	munmap(map, m->end - m->start);
+	munmap(map2, m->end - m->start);
+
+	return NULL;
+}
+
 void sort_and_merge(int fd, FILE *out, int zoom) {
+	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
+
 	struct stat st;
 	if (fstat(fd, &st) < 0) {
 		perror("stat");
@@ -117,7 +148,7 @@ void sort_and_merge(int fd, FILE *out, int zoom) {
 		unit += bytes;
 	}
 
-	int nmerges = (to_sort + unit - 1) / unit;
+	size_t nmerges = (to_sort + unit - 1) / unit;
 	struct merge merges[nmerges];
 
 	long long start;
@@ -127,33 +158,31 @@ void sort_and_merge(int fd, FILE *out, int zoom) {
 			end = to_sort;
 		}
 
-		fprintf(stderr, "Sorting part %lld of %d     \r", start / unit + 1, nmerges);
-
 		merges[start / unit].start = start;
 		merges[start / unit].end = end;
 		merges[start / unit].next = NULL;
+		merges[start / unit].fd = fd;
+	}
 
-		void *map = mmap(NULL, end - start, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, start);
-		if (map == MAP_FAILED) {
-			perror("mmap (sort)");
-			exit(EXIT_FAILURE);
+	for (size_t i = 0; i < nmerges; i += cpus) {
+		fprintf(stderr, "Sorting part %zu of %zu     \r", i + 1, nmerges);
+
+		pthread_t pthreads[cpus];
+		for (size_t j = 0; j < cpus && i + j < nmerges; j++) {
+			if (pthread_create(&pthreads[j], NULL, run_sort, &merges[i + j]) != 0) {
+				perror("pthread_create (sort)");
+				exit(EXIT_FAILURE);
+			}
 		}
 
-		qsort(map, (end - start) / bytes, bytes, indexcmp);
+		for (size_t j = 0; j < cpus && i + j < nmerges; j++) {
+			void *retval;
 
-		// Sorting and then copying avoids the need to
-		// write out intermediate stages of the sort.
-
-		void *map2 = mmap(NULL, end - start, PROT_READ | PROT_WRITE, MAP_SHARED, fd, start);
-		if (map2 == MAP_FAILED) {
-			perror("mmap (write)");
-			exit(EXIT_FAILURE);
+			if (pthread_join(pthreads[j], &retval) != 0) {
+				perror("pthread_join (sort)");
+				exit(EXIT_FAILURE);
+			}
 		}
-
-		memcpy(map2, map, end - start);
-
-		munmap(map, end - start);
-		munmap(map2, end - start);
 	}
 
 	if (fwrite(header_text, HEADER_LEN, 1, out) != 1) {
@@ -168,7 +197,7 @@ void sort_and_merge(int fd, FILE *out, int zoom) {
 			exit(EXIT_FAILURE);
 		}
 
-		for (int i = 0; i < nmerges; i++) {
+		for (size_t i = 0; i < nmerges; i++) {
 			merges[i].map = (unsigned char *) map;
 		}
 
