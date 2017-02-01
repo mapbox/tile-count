@@ -8,11 +8,11 @@
 #include <vector>
 #include <set>
 #include <map>
-#include "projection.hpp"
+#include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
-#include "mvt.hpp"
-#include "mbtiles.hpp"
+#include "tippecanoe/mvt.hpp"
+#include "tippecanoe/mbtiles.hpp"
 
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s [-fs] -z zoom -o out.mbtiles file.count\n", argv[0]);

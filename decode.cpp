@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include "projection.hpp"
+#include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
 

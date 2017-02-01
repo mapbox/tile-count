@@ -5,7 +5,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include "projection.hpp"
+#include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
 
