@@ -8,6 +8,7 @@
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
+#include "merge.hpp"
 
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s -o out.count [-z zoom] [in.csv ...]\n", argv[0]);
@@ -60,87 +61,6 @@ void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzo
 
 		write64(out, index);
 		write32(out, count);
-	}
-}
-
-struct merge {
-	long long start;
-	long long end;
-
-	struct merge *next;
-};
-
-void insert(struct merge *m, struct merge **head, unsigned char *map, int bytes) {
-	while (*head != NULL && memcmp(map + m->start, map + (*head)->start, bytes) > 0) {
-		head = &((*head)->next);
-	}
-
-	m->next = *head;
-	*head = m;
-}
-
-void merge(struct merge *merges, int nmerges, unsigned char *map, FILE *f, int bytes, long long nrec) {
-	int i;
-	struct merge *head = NULL;
-	long long along = 0;
-	long long reported = -1;
-
-	for (i = 0; i < nmerges; i++) {
-		if (merges[i].start < merges[i].end) {
-			insert(&(merges[i]), &head, map, bytes);
-		}
-	}
-
-	unsigned char current_index[INDEX_BYTES] = {0};
-	unsigned long long current_count = 0;
-
-	while (head != NULL) {
-		int cmp = memcmp(map + head->start, current_index, INDEX_BYTES);
-		unsigned long long count = read32(map + head->start + INDEX_BYTES);
-
-		if (cmp < 0) {
-			perror("internal error: file out of order\n");
-			exit(EXIT_FAILURE);
-		}
-
-		if (cmp != 0 || current_count + count > MAX_COUNT) {
-			if (current_count != 0) {
-				if (fwrite(current_index, INDEX_BYTES, 1, f) != 1) {
-					perror("fwrite in merging");
-					exit(EXIT_FAILURE);
-				}
-				write32(f, current_count);
-			}
-
-			memcpy(current_index, map + head->start, INDEX_BYTES);
-			current_count = 0;
-		}
-		current_count += count;
-
-		head->start += bytes;
-
-		struct merge *m = head;
-		head = m->next;
-		m->next = NULL;
-
-		if (m->start < m->end) {
-			insert(m, &head, map, bytes);
-		}
-
-		along++;
-		long long report = 100 * along / nrec;
-		if (report != reported) {
-			fprintf(stderr, "Merging: %lld%%     \r", report);
-			reported = report;
-		}
-	}
-
-	if (current_count != 0) {
-		if (fwrite(current_index, INDEX_BYTES, 1, f) != 1) {
-			perror("fwrite in merging");
-			exit(EXIT_FAILURE);
-		}
-		write32(f, current_count);
 	}
 }
 
@@ -205,12 +125,16 @@ void sort_and_merge(int fd, FILE *out) {
 		exit(EXIT_FAILURE);
 	}
 
+	for (int i = 0; i < nmerges; i++) {
+		merges[i].map = (unsigned char *) map;
+	}
+
 	if (fwrite(header_text, HEADER_LEN, 1, out) != 1) {
 		perror("write header");
 		exit(EXIT_FAILURE);
 	}
 
-	merge(merges, nmerges, (unsigned char *) map, out, bytes, to_sort / bytes);
+	merge(merges, nmerges, out, bytes, to_sort / bytes);
 	munmap(map, st.st_size);
 }
 
@@ -296,4 +220,6 @@ int main(int argc, char **argv) {
 
 	sort_and_merge(fd, fp);
 	fclose(fp);
+
+	return 0;
 }

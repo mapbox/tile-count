@@ -19,7 +19,7 @@ else
 	FINAL_FLAGS := -g $(WARNING_FLAGS) $(DEBUG_FLAGS)
 endif
 
-all: tile-count-create tile-count-decode tile-count-tile
+all: tile-count-create tile-count-decode tile-count-tile tile-count-merge
 
 PG=
 
@@ -29,13 +29,16 @@ C = $(wildcard *.c) $(wildcard *.cpp)
 INCLUDES = -I/usr/local/include -I.
 LIBS = -L/usr/local/lib
 
-tile-count-create: tippecanoe/projection.o create.o header.o serial.o
+tile-count-create: tippecanoe/projection.o create.o header.o serial.o merge.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
 tile-count-decode: tippecanoe/projection.o decode.o header.o serial.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
 tile-count-tile: tippecanoe/projection.o tile.o header.o serial.o tippecanoe/mbtiles.o tippecanoe/mvt.o
+	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
+
+tile-count-merge: mergetool.o header.o serial.o merge.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
 -include $(wildcard *.d)
