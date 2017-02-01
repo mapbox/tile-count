@@ -6,18 +6,23 @@ A tool for accumulating point counts by tile.
 Creating a count
 ----------------
 
-    tile-count-create [-z zoom] -o out.count [file.csv ...]
+    tile-count-create [-z zoom] -o out.count [file.csv ...] [file.json ...]
 
 The `-z` option specifies the maximum precision of the data, so that duplicates
 beyond this precision can be pre-summed to make the data file smaller.
 
-The input CSV is a list of records in the form:
+If the input is CSV, it is a list of records in the form:
 
     lon,lat
 
 or
 
     lon,lat,count
+
+If it is JSON, any array of two or more numbers will be treated as a longitude-latitude
+pair. This includes GeoJSON Points as well as the points that make up GeoJSON MultiPoints,
+LineStrings, MultiLineStrings, Polygons, and MultiPolygons. Beware that it also includes
+anything else that might be mistaken for a longitude-latitude pair.
 
 The input is first streamed into the internal format specified below (minus the header)
 and then

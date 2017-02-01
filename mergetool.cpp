@@ -77,10 +77,10 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-        if (fwrite(header_text, HEADER_LEN, 1, out) != 1) {
-                perror("write header");
-                exit(EXIT_FAILURE);
-        }
+	if (fwrite(header_text, HEADER_LEN, 1, out) != 1) {
+		perror("write header");
+		exit(EXIT_FAILURE);
+	}
 
 	merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES);
 	fclose(out);

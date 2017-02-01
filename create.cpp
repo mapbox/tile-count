@@ -10,6 +10,10 @@
 #include "serial.hpp"
 #include "merge.hpp"
 
+extern "C" {
+#include "jsonpull/jsonpull.h"
+}
+
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s -o out.count [-z zoom] [in.csv ...]\n", argv[0]);
 }
@@ -18,16 +22,76 @@ int indexcmp(const void *p1, const void *p2) {
 	return memcmp(p1, p2, INDEX_BYTES);
 }
 
-void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzoom) {
-	size_t line = 0;
-	char s[2000];
+void write_point(FILE *out, long long &seq, long long mask, double lon, double lat, unsigned long long count) {
+	if (seq % 100000 == 0) {
+		fprintf(stderr, "Read %.1f million records\r", seq / 1000000.0);
+	}
+	seq++;
 
+	long long x, y;
+	projection->project(lon, lat, 32, &x, &y);
+	x &= mask;
+	y &= mask;
+	unsigned long long index = encode(x, y);
+
+	while (count > MAX_COUNT) {
+		write64(out, index);
+		write32(out, MAX_COUNT);
+
+		count -= MAX_COUNT;
+	}
+
+	write64(out, index);
+	write32(out, count);
+}
+
+void read_json(FILE *out, FILE *in, const char *fname, long long &seq, int maxzoom, unsigned long long mask) {
+	json_pull *jp = json_begin_file(in);
+
+	while (1) {
+		json_object *j = json_read(jp);
+		if (j == NULL) {
+			if (jp->error != NULL) {
+				fprintf(stderr, "%s:%d: %s\n", fname, jp->line, jp->error);
+			}
+
+			json_free(jp->root);
+			break;
+		}
+
+		if (j->type == JSON_HASH) {
+			json_free(j);
+		} else if (j->type == JSON_ARRAY) {
+			if (j->length >= 2) {
+				if (j->array[0]->type == JSON_NUMBER && j->array[1]->type == JSON_NUMBER) {
+					write_point(out, seq, mask, j->array[0]->number, j->array[1]->number, 1);
+				}
+			}
+			json_free(j);
+		}
+	}
+
+	json_end(jp);
+}
+
+void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzoom) {
 	unsigned long long mask = 0xFFFFFFFF;
 	if (maxzoom != 32) {
 		mask = mask << (32 - maxzoom);
 	}
 	mask &= 0xFFFFFFFF;
 
+	int c = getc(in);
+	if (c != EOF) {
+		ungetc(c, in);
+	}
+	if (c == '{') {
+		read_json(out, in, fname, seq, maxzoom, mask);
+		return;
+	}
+
+	size_t line = 0;
+	char s[2000];
 	while (fgets(s, 2000, in)) {
 		double lon, lat;
 		unsigned long long count;
@@ -41,26 +105,7 @@ void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzo
 			continue;
 		}
 
-		if (seq % 100000 == 0) {
-			fprintf(stderr, "Read %.1f million records\r", seq / 1000000.0);
-		}
-		seq++;
-
-		long long x, y;
-		projection->project(lon, lat, 32, &x, &y);
-		x &= mask;
-		y &= mask;
-		unsigned long long index = encode(x, y);
-
-		while (count > MAX_COUNT) {
-			write64(out, index);
-			write32(out, MAX_COUNT);
-
-			count -= MAX_COUNT;
-		}
-
-		write64(out, index);
-		write32(out, count);
+		write_point(out, seq, mask, lon, lat, count);
 	}
 }
 

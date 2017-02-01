@@ -29,7 +29,7 @@ C = $(wildcard *.c) $(wildcard *.cpp)
 INCLUDES = -I/usr/local/include -I.
 LIBS = -L/usr/local/lib
 
-tile-count-create: tippecanoe/projection.o create.o header.o serial.o merge.o
+tile-count-create: tippecanoe/projection.o create.o header.o serial.o merge.o jsonpull/jsonpull.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
 tile-count-decode: tippecanoe/projection.o decode.o header.o serial.o
@@ -42,6 +42,9 @@ tile-count-merge: mergetool.o header.o serial.o merge.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
 -include $(wildcard *.d)
+
+%.o: %.c
+	$(CC) -MMD $(PG) $(INCLUDES) $(FINAL_FLAGS) $(CFLAGS) -c -o $@ $<
 
 %.o: %.cpp
 	$(CXX) -MMD $(PG) $(INCLUDES) $(FINAL_FLAGS) $(CXXFLAGS) -c -o $@ $<
