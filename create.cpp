@@ -18,7 +18,7 @@ void usage(char **argv) {
 	fprintf(stderr, "Usage: %s -o out.count [-z zoom] [in.csv ...]\n", argv[0]);
 }
 
-void write_point(FILE *out, long long &seq, long long mask, double lon, double lat, unsigned long long count) {
+void write_point(FILE *out, long long &seq, double lon, double lat, unsigned long long count) {
 	if (seq % 100000 == 0) {
 		fprintf(stderr, "Read %.1f million records\r", seq / 1000000.0);
 	}
@@ -26,8 +26,6 @@ void write_point(FILE *out, long long &seq, long long mask, double lon, double l
 
 	long long x, y;
 	projection->project(lon, lat, 32, &x, &y);
-	x &= mask;
-	y &= mask;
 	unsigned long long index = encode(x, y);
 
 	while (count > MAX_COUNT) {
@@ -41,7 +39,7 @@ void write_point(FILE *out, long long &seq, long long mask, double lon, double l
 	write32(out, count);
 }
 
-void read_json(FILE *out, FILE *in, const char *fname, long long &seq, int maxzoom, unsigned long long mask) {
+void read_json(FILE *out, FILE *in, const char *fname, long long &seq) {
 	json_pull *jp = json_begin_file(in);
 
 	while (1) {
@@ -60,7 +58,7 @@ void read_json(FILE *out, FILE *in, const char *fname, long long &seq, int maxzo
 		} else if (j->type == JSON_ARRAY) {
 			if (j->length >= 2) {
 				if (j->array[0]->type == JSON_NUMBER && j->array[1]->type == JSON_NUMBER) {
-					write_point(out, seq, mask, j->array[0]->number, j->array[1]->number, 1);
+					write_point(out, seq, j->array[0]->number, j->array[1]->number, 1);
 				}
 			}
 			json_free(j);
@@ -70,19 +68,13 @@ void read_json(FILE *out, FILE *in, const char *fname, long long &seq, int maxzo
 	json_end(jp);
 }
 
-void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzoom) {
-	unsigned long long mask = 0xFFFFFFFF;
-	if (maxzoom != 32) {
-		mask = mask << (32 - maxzoom);
-	}
-	mask &= 0xFFFFFFFF;
-
+void read_into(FILE *out, FILE *in, const char *fname, long long &seq) {
 	int c = getc(in);
 	if (c != EOF) {
 		ungetc(c, in);
 	}
 	if (c == '{') {
-		read_json(out, in, fname, seq, maxzoom, mask);
+		read_json(out, in, fname, seq);
 		return;
 	}
 
@@ -101,7 +93,7 @@ void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzo
 			continue;
 		}
 
-		write_point(out, seq, mask, lon, lat, count);
+		write_point(out, seq, lon, lat, count);
 	}
 }
 
@@ -109,7 +101,7 @@ int indexcmp(const void *p1, const void *p2) {
 	return memcmp(p1, p2, INDEX_BYTES);
 }
 
-void sort_and_merge(int fd, FILE *out) {
+void sort_and_merge(int fd, FILE *out, int zoom) {
 	struct stat st;
 	if (fstat(fd, &st) < 0) {
 		perror("stat");
@@ -180,7 +172,7 @@ void sort_and_merge(int fd, FILE *out) {
 			merges[i].map = (unsigned char *) map;
 		}
 
-		merge(merges, nmerges, out, bytes, to_sort / bytes);
+		merge(merges, nmerges, out, bytes, to_sort / bytes, zoom);
 		munmap(map, st.st_size);
 	}
 }
@@ -236,7 +228,7 @@ int main(int argc, char **argv) {
 
 	long long seq = 0;
 	if (optind == argc) {
-		read_into(fp, stdin, "standard input", seq, zoom);
+		read_into(fp, stdin, "standard input", seq);
 	} else {
 		for (; optind < argc; optind++) {
 			FILE *in = fopen(argv[optind], "r");
@@ -244,7 +236,7 @@ int main(int argc, char **argv) {
 				perror(argv[optind]);
 				exit(EXIT_FAILURE);
 			} else {
-				read_into(fp, in, argv[optind], seq, zoom);
+				read_into(fp, in, argv[optind], seq);
 				fclose(in);
 			}
 		}
@@ -265,7 +257,7 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	sort_and_merge(fd, fp);
+	sort_and_merge(fd, fp, zoom);
 	fclose(fp);
 
 	return 0;

@@ -18,10 +18,15 @@ int main(int argc, char **argv) {
 	extern char *optarg;
 
 	char *outfile = NULL;
+	int zoom = 32;
 
 	int i;
-	while ((i = getopt(argc, argv, "o:")) != -1) {
+	while ((i = getopt(argc, argv, "o:z:")) != -1) {
 		switch (i) {
+		case 'z':
+			zoom = atoi(optarg);
+			break;
+
 		case 'o':
 			outfile = optarg;
 			break;
@@ -82,7 +87,7 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES);
+	merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom);
 	fclose(out);
 
 	return 0;

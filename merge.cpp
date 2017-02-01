@@ -14,7 +14,12 @@ void insert(struct merge *m, struct merge **head, int bytes) {
 	*head = m;
 }
 
-void merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec) {
+void merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec, int zoom) {
+	unsigned long long mask = 0;
+	if (zoom != 0) {
+		mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);
+	}
+
 	int i;
 	struct merge *head = NULL;
 	long long along = 0;
@@ -26,28 +31,25 @@ void merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec
 		}
 	}
 
-	unsigned char current_index[INDEX_BYTES] = {0};
+	unsigned long long current_index = 0;
 	unsigned long long current_count = 0;
 
 	while (head != NULL) {
-		int cmp = memcmp(head->map + head->start, current_index, INDEX_BYTES);
+		unsigned long long new_index = read64(head->map + head->start) & mask;
 		unsigned long long count = read32(head->map + head->start + INDEX_BYTES);
 
-		if (cmp < 0) {
-			fprintf(stderr, "Internal error: file out of order: %llx vs %llx\n", read64(head->map + head->start), read64(current_index));
+		if (new_index < current_index) {
+			fprintf(stderr, "Internal error: file out of order: %llx vs %llx\n", read64(head->map + head->start), current_index);
 			exit(EXIT_FAILURE);
 		}
 
-		if (cmp != 0 || current_count + count > MAX_COUNT) {
+		if (new_index != current_index || current_count + count > MAX_COUNT) {
 			if (current_count != 0) {
-				if (fwrite(current_index, INDEX_BYTES, 1, f) != 1) {
-					perror("fwrite in merging");
-					exit(EXIT_FAILURE);
-				}
+				write64(f, current_index);
 				write32(f, current_count);
 			}
 
-			memcpy(current_index, head->map + head->start, INDEX_BYTES);
+			current_index = new_index;
 			current_count = 0;
 		}
 		current_count += count;
@@ -71,10 +73,7 @@ void merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec
 	}
 
 	if (current_count != 0) {
-		if (fwrite(current_index, INDEX_BYTES, 1, f) != 1) {
-			perror("fwrite in merging");
-			exit(EXIT_FAILURE);
-		}
+		write64(f, current_index);
 		write32(f, current_count);
 	}
 }

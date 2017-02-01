@@ -32,10 +32,13 @@ summed.
 Merging counts
 --------------
 
-    tile-count-merge -o out.count in1.count [in2.count ...]
+    tile-count-merge -o out.count [-z zoom] in1.count [in2.count ...]
 
 Produces a new count file from the specified count files, summing the counts for any points
 duplicated between the two.
+
+If you specify a `zoom`, the precision of all locations in the output file will be reduced
+as specified.
 
 Decoding counts
 ---------------
