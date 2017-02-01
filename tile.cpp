@@ -107,13 +107,19 @@ int main(int argc, char **argv) {
 	}
 	sqlite3 *outdb = mbtiles_open(outfile, argv, false);
 
-	size_t zooms = zoom - 9;
 	size_t detail = 9;
+	size_t zooms = zoom - detail + 1;
+	if (zooms < 1) {
+		zooms = 1;
+	}
 
 	std::vector<tile> tiles;
 	for (size_t z = 0; z < zooms; z++) {
 		tiles.push_back(tile(detail));
 	}
+
+	long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
+	long long midx = 0, midy = 0;
 
 	for (; optind < argc; optind++) {
 		struct stat st;
@@ -143,6 +149,8 @@ int main(int argc, char **argv) {
 		unsigned char buf[16];
 		long long seq = 0;
 		long long percent = -1;
+		long long max = 0;
+
 		while (fread(buf, 16, 1, f) == 1) {
 			unsigned long long index = read64(buf);
 			unsigned long long count = read64(buf + 8);
@@ -156,6 +164,19 @@ int main(int argc, char **argv) {
 
 			unsigned wx, wy;
 			decode(index, &wx, &wy);
+
+			if (wx < file_bbox[0]) {
+				file_bbox[0] = wx;
+			}
+			if (wy < file_bbox[1]) {
+				file_bbox[1] = wy;
+			}
+			if (wx > file_bbox[2]) {
+				file_bbox[2] = wx;
+			}
+			if (wy > file_bbox[3]) {
+				file_bbox[3] = wy;
+			}
 
 			for (size_t z = 0; z < zooms; z++) {
 				unsigned tx = wx, ty = wy;
@@ -189,6 +210,12 @@ int main(int argc, char **argv) {
 				}
 
 				tiles[z].count[py * (1 << detail) + px] += count;
+
+				if (tiles[z].count[py * (1 << detail) + px] > max) {
+					max = tiles[z].count[py * (1 << detail) + px];
+					midx = wx;
+					midy = wy;
+				}
 			}
 		}
 
@@ -201,7 +228,11 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;  // XXX
+	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;
+
+	tile2lonlat(midx, midy, 32, &midlon, &midlat);
+	tile2lonlat(file_bbox[0], file_bbox[1], 32, &minlon, &maxlat);
+	tile2lonlat(file_bbox[2], file_bbox[3], 32, &maxlon, &minlat);
 
 	type_and_string tas;
 	tas.type = VT_NUMBER;
