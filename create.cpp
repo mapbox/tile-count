@@ -18,10 +18,6 @@ void usage(char **argv) {
 	fprintf(stderr, "Usage: %s -o out.count [-z zoom] [in.csv ...]\n", argv[0]);
 }
 
-int indexcmp(const void *p1, const void *p2) {
-	return memcmp(p1, p2, INDEX_BYTES);
-}
-
 void write_point(FILE *out, long long &seq, long long mask, double lon, double lat, unsigned long long count) {
 	if (seq % 100000 == 0) {
 		fprintf(stderr, "Read %.1f million records\r", seq / 1000000.0);
@@ -109,6 +105,10 @@ void read_into(FILE *out, FILE *in, const char *fname, long long &seq, int maxzo
 	}
 }
 
+int indexcmp(const void *p1, const void *p2) {
+	return memcmp(p1, p2, INDEX_BYTES);
+}
+
 void sort_and_merge(int fd, FILE *out) {
 	struct stat st;
 	if (fstat(fd, &st) < 0) {
@@ -164,23 +164,25 @@ void sort_and_merge(int fd, FILE *out) {
 		munmap(map2, end - start);
 	}
 
-	void *map = mmap(NULL, to_sort, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-	if (map == MAP_FAILED) {
-		perror("mmap (for merge)");
-		exit(EXIT_FAILURE);
-	}
-
-	for (int i = 0; i < nmerges; i++) {
-		merges[i].map = (unsigned char *) map;
-	}
-
 	if (fwrite(header_text, HEADER_LEN, 1, out) != 1) {
 		perror("write header");
 		exit(EXIT_FAILURE);
 	}
 
-	merge(merges, nmerges, out, bytes, to_sort / bytes);
-	munmap(map, st.st_size);
+	if (to_sort > 0) {
+		void *map = mmap(NULL, to_sort, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+		if (map == MAP_FAILED) {
+			perror("mmap (for merge)");
+			exit(EXIT_FAILURE);
+		}
+
+		for (int i = 0; i < nmerges; i++) {
+			merges[i].map = (unsigned char *) map;
+		}
+
+		merge(merges, nmerges, out, bytes, to_sort / bytes);
+		munmap(map, st.st_size);
+	}
 }
 
 int main(int argc, char **argv) {
