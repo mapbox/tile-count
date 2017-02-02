@@ -12,7 +12,6 @@ void usage(char **argv) {
 
 int main(int argc, char **argv) {
 	extern int optind;
-	extern char *optarg;
 
 	int i;
 	while ((i = getopt(argc, argv, "")) != -1) {

@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/mman.h>
+#include <limits.h>
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
@@ -62,8 +63,8 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square)
 	layer.version = 2;
 	layer.extent = 4096;
 
-	for (size_t y = 0; y < (1 << detail); y++) {
-		for (size_t x = 0; x < (1 << detail); x++) {
+	for (size_t y = 0; y < (1U << detail); y++) {
+		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 
 			if (count != 0) {
@@ -383,7 +384,7 @@ int main(int argc, char **argv) {
 			if (a == partials.end()) {
 				partials.insert(std::pair<std::vector<unsigned>, tile>(key, tilers[j].partial_tiles[k]));
 			} else {
-				for (size_t x = 0; x < (1 << detail) * (1 << detail); x++) {
+				for (size_t x = 0; x < (1U << detail) * (1U << detail); x++) {
 					a->second.count[x] += tilers[j].partial_tiles[k].count[x];
 				}
 			}
