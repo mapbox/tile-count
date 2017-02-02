@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <sys/mman.h>
 #include <limits.h>
+#include <math.h>
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
@@ -51,17 +52,20 @@ struct tiler {
 	size_t detail;
 	sqlite3 *outdb;
 	bool square;
+	int maxzoom;
 
 	volatile int *progress;
 	size_t shard;
 	size_t cpus;
 };
 
-void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square) {
+void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square, int maxzoom) {
 	mvt_layer layer;
 	layer.name = "count";
 	layer.version = 2;
 	layer.extent = 4096;
+
+	double scale = exp(log(2.5) * (z - maxzoom));
 
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
@@ -84,6 +88,12 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square)
 				val.type = mvt_uint;
 				val.numeric_value.uint_value = count;
 				layer.tag(feature, "count", val);
+
+				mvt_value val2;
+				val2.type = mvt_uint;
+				val2.numeric_value.uint_value = count * scale;
+				layer.tag(feature, "density", val2);
+
 				layer.features.push_back(feature);
 			}
 		}
@@ -204,7 +214,7 @@ void *run_tile(void *p) {
 					// printf("%zu/%lld/%lld: %llx (%llx %llx) %llx\n", z, t->tiles[z].x, t->tiles[z].y, first, first_for_tile, last_for_tile, last);
 
 					if (first_for_tile >= first && last_for_tile <= last) {
-						make_tile(t->outdb, t->tiles[z], z, t->detail, t->square);
+						make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
 					} else {
 						t->partial_tiles.push_back(t->tiles[z]);
 					}
@@ -235,7 +245,7 @@ void *run_tile(void *p) {
 			// printf("%zu/%lld/%lld: %llx (%llx %llx) %llx\n", z, t->tiles[z].x, t->tiles[z].y, first, first_for_tile, last_for_tile, last);
 
 			if (first_for_tile >= first && last_for_tile <= last) {
-				make_tile(t->outdb, t->tiles[z], z, t->detail, t->square);
+				make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
 			} else {
 				t->partial_tiles.push_back(t->tiles[z]);
 			}
@@ -316,6 +326,7 @@ int main(int argc, char **argv) {
 		tilers[j].progress[j] = 0;
 		tilers[j].cpus = cpus;
 		tilers[j].shard = j;
+		tilers[j].maxzoom = zooms - 1;
 	}
 
 	for (; optind < argc; optind++) {
@@ -392,7 +403,7 @@ int main(int argc, char **argv) {
 	}
 
 	for (auto a = partials.begin(); a != partials.end(); a++) {
-		make_tile(outdb, a->second, a->second.z, detail, square);
+		make_tile(outdb, a->second, a->second.z, detail, square, zooms - 1);
 	}
 
 	long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
@@ -421,8 +432,13 @@ int main(int argc, char **argv) {
 	tas.type = VT_NUMBER;
 	tas.string = "count";
 
+	type_and_string tas2;
+	tas.type = VT_NUMBER;
+	tas.string = "density";
+
 	layermap_entry lme(0);
 	lme.file_keys.insert(tas);
+	lme.file_keys.insert(tas2);
 	lme.minzoom = 0;
 	lme.maxzoom = zooms - 1;
 
