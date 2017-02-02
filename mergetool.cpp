@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom);
+	do_merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom);
 	fclose(out);
 
 	return 0;

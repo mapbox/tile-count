@@ -201,7 +201,7 @@ void sort_and_merge(int fd, FILE *out, int zoom) {
 			merges[i].map = (unsigned char *) map;
 		}
 
-		merge(merges, nmerges, out, bytes, to_sort / bytes, zoom);
+		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom);
 		munmap(map, st.st_size);
 	}
 }

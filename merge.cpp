@@ -14,7 +14,7 @@ void insert(struct merge *m, struct merge **head, int bytes) {
 	*head = m;
 }
 
-void merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec, int zoom) {
+void do_merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec, int zoom) {
 	unsigned long long mask = 0;
 	if (zoom != 0) {
 		mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);

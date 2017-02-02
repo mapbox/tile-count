@@ -7,4 +7,4 @@ struct merge {
 	struct merge *next;
 };
 
-void merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec, int zoom);
+void do_merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec, int zoom);
