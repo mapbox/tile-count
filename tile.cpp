@@ -8,6 +8,9 @@
 #include <vector>
 #include <set>
 #include <map>
+#include <fcntl.h>
+#include <pthread.h>
+#include <sys/mman.h>
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
@@ -21,15 +24,32 @@ void usage(char **argv) {
 struct tile {
 	long long x;
 	long long y;
+	int z;
 	std::vector<long long> count;
 	bool active;
 
-	tile(size_t dim) {
+	tile(size_t dim, int zoom) {
 		x = -1;
 		y = -1;
+		z = zoom;
 		count.resize((1 << dim) * (1 << dim), 0);
 		active = false;
 	}
+};
+
+struct tiler {
+	std::vector<tile> tiles;
+	std::vector<tile> partial_tiles;
+	size_t start;
+	size_t end;
+	long long bbox[4];
+	long long midx, midy;
+
+	unsigned char *map;
+	size_t zooms;
+	size_t detail;
+	sqlite3 *outdb;
+	bool square;
 };
 
 void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square) {
@@ -74,6 +94,90 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square)
 	}
 
 	mbtiles_write_tile(outdb, z, tile.x, tile.y, compressed.data(), compressed.size());
+}
+
+void *run_tile(void *p) {
+	tiler *t = (tiler *) p;
+
+	long long seq = 0;
+	long long percent = -1;
+	long long max = 0;
+
+	for (size_t i = t->start; i < t->end; i++) {
+		unsigned long long index = read64(t->map + i * RECORD_BYTES);
+		unsigned long long count = read32(t->map + i * RECORD_BYTES + INDEX_BYTES);
+		seq++;
+
+		long long npercent = 100 * seq / (t->end - t->start);
+		if (npercent != percent) {
+			percent = npercent;
+			fprintf(stderr, "  %lld%%\r", percent);
+		}
+
+		unsigned wx, wy;
+		decode(index, &wx, &wy);
+
+		if (wx < t->bbox[0]) {
+			t->bbox[0] = wx;
+		}
+		if (wy < t->bbox[1]) {
+			t->bbox[1] = wy;
+		}
+		if (wx > t->bbox[2]) {
+			t->bbox[2] = wx;
+		}
+		if (wy > t->bbox[3]) {
+			t->bbox[3] = wy;
+		}
+
+		for (size_t z = 0; z < t->zooms; z++) {
+			unsigned tx = wx, ty = wy;
+			if (z + t->detail != 32) {
+				tx >>= (32 - (z + t->detail));
+				ty >>= (32 - (z + t->detail));
+			}
+
+			unsigned px = tx, py = ty;
+			if (t->detail != 32) {
+				px &= ((1 << t->detail) - 1);
+				py &= ((1 << t->detail) - 1);
+
+				tx >>= t->detail;
+				ty >>= t->detail;
+			} else {
+				tx = 0;
+				ty = 0;
+			}
+
+			if (t->tiles[z].x != tx || t->tiles[z].y != ty) {
+				if (t->tiles[z].active) {
+					make_tile(t->outdb, t->tiles[z], z, t->detail, t->square);
+				}
+
+				t->tiles[z].active = true;
+				t->tiles[z].x = tx;
+				t->tiles[z].y = ty;
+				t->tiles[z].count.resize(0);
+				t->tiles[z].count.resize((1 << t->detail) * (1 << t->detail), 0);
+			}
+
+			t->tiles[z].count[py * (1 << t->detail) + px] += count;
+
+			if (t->tiles[z].count[py * (1 << t->detail) + px] > max) {
+				max = t->tiles[z].count[py * (1 << t->detail) + px];
+				t->midx = wx;
+				t->midy = wy;
+			}
+		}
+	}
+
+	for (size_t z = 0; z < t->zooms; z++) {
+		if (t->tiles[z].active) {
+			make_tile(t->outdb, t->tiles[z], z, t->detail, t->square);
+		}
+	}
+
+	return NULL;
 }
 
 int main(int argc, char **argv) {
@@ -127,13 +231,22 @@ int main(int argc, char **argv) {
 		detail = zoom;
 	}
 
-	std::vector<tile> tiles;
-	for (size_t z = 0; z < zooms; z++) {
-		tiles.push_back(tile(detail));
-	}
+	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
+	std::vector<tiler> tilers;
+	tilers.resize(cpus);
 
-	long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
-	long long midx = 0, midy = 0;
+	for (size_t j = 0; j < cpus; j++) {
+		for (size_t z = 0; z < zooms; z++) {
+			tilers[j].tiles.push_back(tile(detail, z));
+		}
+		tilers[j].bbox[0] = tilers[j].bbox[1] = UINT_MAX;
+		tilers[j].bbox[2] = tilers[j].bbox[3] = 0;
+		tilers[j].midx = tilers[j].midy = 0;
+		tilers[j].zooms = zooms;
+		tilers[j].detail = detail;
+		tilers[j].outdb = outdb;
+		tilers[j].square = square;
+	}
 
 	for (; optind < argc; optind++) {
 		struct stat st;
@@ -141,110 +254,73 @@ int main(int argc, char **argv) {
 			perror(optind[argv]);
 			exit(EXIT_FAILURE);
 		}
-		long long records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
 
-		FILE *f = fopen(argv[optind], "rb");
-		if (f == NULL) {
-			perror(optind[argv]);
+		int fd = open(argv[optind], O_RDONLY);
+		if (fd < 0) {
+			perror(argv[optind]);
+			exit(EXIT_FAILURE);
+		}
+		unsigned char *map = (unsigned char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+		if (map == MAP_FAILED) {
+			perror("mmap");
 			exit(EXIT_FAILURE);
 		}
 
-		char header[HEADER_LEN];
-		if (fread(header, HEADER_LEN, 1, f) != 1) {
-			perror("read header");
-			exit(EXIT_FAILURE);
-		}
-
-		if (memcmp(header, header_text, HEADER_LEN) != 0) {
+		if (memcmp(map, header_text, HEADER_LEN) != 0) {
 			fprintf(stderr, "%s: not a tile-count file\n", argv[optind]);
 			exit(EXIT_FAILURE);
 		}
 
-		unsigned char buf[RECORD_BYTES];
-		long long seq = 0;
-		long long percent = -1;
-		long long max = 0;
-
-		while (fread(buf, RECORD_BYTES, 1, f) == 1) {
-			unsigned long long index = read64(buf);
-			unsigned long long count = read32(buf + INDEX_BYTES);
-			seq++;
-
-			long long npercent = 100 * seq / records;
-			if (npercent != percent) {
-				percent = npercent;
-				fprintf(stderr, "  %lld%%\r", percent);
+		size_t records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
+		for (size_t j = 0; j < cpus; j++) {
+			tilers[j].map = map;
+			tilers[j].start = j * records / cpus;
+			if (j > 0) {
+				tilers[j - 1].end = tilers[j].start;
 			}
+		}
+		tilers[cpus - 1].end = records;
 
-			unsigned wx, wy;
-			decode(index, &wx, &wy);
-
-			if (wx < file_bbox[0]) {
-				file_bbox[0] = wx;
-			}
-			if (wy < file_bbox[1]) {
-				file_bbox[1] = wy;
-			}
-			if (wx > file_bbox[2]) {
-				file_bbox[2] = wx;
-			}
-			if (wy > file_bbox[3]) {
-				file_bbox[3] = wy;
-			}
-
-			for (size_t z = 0; z < zooms; z++) {
-				unsigned tx = wx, ty = wy;
-				if (z + detail != 32) {
-					tx >>= (32 - (z + detail));
-					ty >>= (32 - (z + detail));
-				}
-
-				unsigned px = tx, py = ty;
-				if (detail != 32) {
-					px &= ((1 << detail) - 1);
-					py &= ((1 << detail) - 1);
-
-					tx >>= detail;
-					ty >>= detail;
-				} else {
-					tx = 0;
-					ty = 0;
-				}
-
-				if (tiles[z].x != tx || tiles[z].y != ty) {
-					if (tiles[z].active) {
-						make_tile(outdb, tiles[z], z, detail, square);
-					}
-
-					tiles[z].active = true;
-					tiles[z].x = tx;
-					tiles[z].y = ty;
-					tiles[z].count.resize(0);
-					tiles[z].count.resize((1 << detail) * (1 << detail), 0);
-				}
-
-				tiles[z].count[py * (1 << detail) + px] += count;
-
-				if (tiles[z].count[py * (1 << detail) + px] > max) {
-					max = tiles[z].count[py * (1 << detail) + px];
-					midx = wx;
-					midy = wy;
-				}
+		pthread_t pthreads[cpus];
+		for (size_t j = 0; j < cpus; j++) {
+			if (pthread_create(&pthreads[j], NULL, run_tile, &tilers[j]) != 0) {
+				perror("pthread_create");
+				exit(EXIT_FAILURE);
 			}
 		}
 
-		fclose(f);
+		for (size_t j = 0; j < cpus; j++) {
+			void *retval;
 
-		for (size_t z = 0; z < zooms; z++) {
-			if (tiles[z].active) {
-				make_tile(outdb, tiles[z], z, detail, square);
+			if (pthread_join(pthreads[j], &retval) != 0) {
+				perror("pthread_join");
+				exit(EXIT_FAILURE);
 			}
+		}
+
+#if 0
+#endif
+	}
+
+	long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
+	for (size_t j = 0; j < cpus; j++) {
+		if (tilers[j].bbox[0] < file_bbox[0]) {
+			file_bbox[0] = tilers[j].bbox[0];
+		}
+		if (tilers[j].bbox[1] < file_bbox[1]) {
+			file_bbox[1] = tilers[j].bbox[1];
+		}
+		if (tilers[j].bbox[2] > file_bbox[2]) {
+			file_bbox[2] = tilers[j].bbox[2];
+		}
+		if (tilers[j].bbox[3] > file_bbox[3]) {
+			file_bbox[3] = tilers[j].bbox[3];
 		}
 	}
 
 	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;
 
-	tile2lonlat(midx, midy, 32, &midlon, &midlat);
+	tile2lonlat(tilers[0].midx, tilers[0].midy, 32, &midlon, &midlat);  // XXX unstable
 	tile2lonlat(file_bbox[0], file_bbox[1], 32, &minlon, &maxlat);
 	tile2lonlat(file_bbox[2], file_bbox[3], 32, &maxlon, &minlat);
 
