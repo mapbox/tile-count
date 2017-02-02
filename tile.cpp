@@ -351,6 +351,32 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	// Collect and consolidate partially counted tiles
+
+	std::map<std::vector<unsigned>, tile> partials;
+	for (size_t j = 0; j < cpus; j++) {
+		for (size_t k = 0; k < tilers[j].partial_tiles.size(); k++) {
+			std::vector<unsigned> key;
+			key.push_back(tilers[j].partial_tiles[k].z);
+			key.push_back(tilers[j].partial_tiles[k].x);
+			key.push_back(tilers[j].partial_tiles[k].y);
+
+			auto a = partials.find(key);
+
+			if (a == partials.end()) {
+				partials.insert(std::pair<std::vector<unsigned>, tile>(key, tilers[j].partial_tiles[k]));
+			} else {
+				for (size_t x = 0; x < (1 << detail) * (1 << detail); x++) {
+					a->second.count[x] += tilers[j].partial_tiles[k].count[x];
+				}
+			}
+		}
+	}
+
+	for (auto a = partials.begin(); a != partials.end(); a++) {
+		make_tile(outdb, a->second, a->second.z, detail, square);
+	}
+
 	long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
 	for (size_t j = 0; j < cpus; j++) {
 		if (tilers[j].bbox[0] < file_bbox[0]) {
