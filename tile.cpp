@@ -93,7 +93,19 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square)
 		exit(EXIT_FAILURE);
 	}
 
+	static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;
+
+	if (pthread_mutex_lock(&db_lock) != 0) {
+		perror("pthread_mutex_lock");
+		exit(EXIT_FAILURE);
+	}
+
 	mbtiles_write_tile(outdb, z, tile.x, tile.y, compressed.data(), compressed.size());
+
+	if (pthread_mutex_unlock(&db_lock) != 0) {
+		perror("pthread_mutex_unlock");
+		exit(EXIT_FAILURE);
+	}
 }
 
 void *run_tile(void *p) {
@@ -103,10 +115,16 @@ void *run_tile(void *p) {
 	long long percent = -1;
 	long long max = 0;
 
+	unsigned long long oindex = 0;
 	for (size_t i = t->start; i < t->end; i++) {
-		unsigned long long index = read64(t->map + i * RECORD_BYTES);
-		unsigned long long count = read32(t->map + i * RECORD_BYTES + INDEX_BYTES);
+		unsigned long long index = read64(t->map + HEADER_LEN + i * RECORD_BYTES);
+		unsigned long long count = read32(t->map + HEADER_LEN + i * RECORD_BYTES + INDEX_BYTES);
 		seq++;
+
+		if (oindex > index) {
+			fprintf(stderr, "out of order: %llx vs %llx\n", oindex, index);
+		}
+		oindex = index;
 
 		long long npercent = 100 * seq / (t->end - t->start);
 		if (npercent != percent) {
@@ -297,9 +315,6 @@ int main(int argc, char **argv) {
 				exit(EXIT_FAILURE);
 			}
 		}
-
-#if 0
-#endif
 	}
 
 	long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
