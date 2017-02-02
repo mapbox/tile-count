@@ -50,6 +50,10 @@ struct tiler {
 	size_t detail;
 	sqlite3 *outdb;
 	bool square;
+
+	volatile int *progress;
+	size_t shard;
+	size_t cpus;
 };
 
 void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square) {
@@ -145,7 +149,15 @@ void *run_tile(void *p) {
 		long long npercent = 100 * seq / (t->end - t->start);
 		if (npercent != percent) {
 			percent = npercent;
-			fprintf(stderr, "  %lld%%\r", percent);
+			t->progress[t->shard] = percent;
+
+			int sum = 0;
+			for (size_t j = 0; j < t->cpus; j++) {
+				sum += t->progress[j];
+			}
+			sum /= t->cpus;
+
+			fprintf(stderr, "  %d%%\r", sum);
 		}
 
 		unsigned wx, wy;
@@ -284,6 +296,7 @@ int main(int argc, char **argv) {
 	}
 
 	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
+	volatile int progress[cpus];
 	std::vector<tiler> tilers;
 	tilers.resize(cpus);
 
@@ -298,6 +311,10 @@ int main(int argc, char **argv) {
 		tilers[j].detail = detail;
 		tilers[j].outdb = outdb;
 		tilers[j].square = square;
+		tilers[j].progress = progress;
+		tilers[j].progress[j] = 0;
+		tilers[j].cpus = cpus;
+		tilers[j].shard = j;
 	}
 
 	for (; optind < argc; optind++) {
