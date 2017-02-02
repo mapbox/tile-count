@@ -108,8 +108,24 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square)
 	}
 }
 
+void calc_tile_edges(size_t z, long long x, long long y, unsigned long long &start, unsigned long long &end) {
+	start = encode(x << (32 - z), y << (32 - z));
+	end = start;
+
+	for (size_t i = 0; i < 32 - z; i++) {
+		end |= 3ULL << (2 * i);
+	}
+}
+
 void *run_tile(void *p) {
 	tiler *t = (tiler *) p;
+
+	if (t->start >= t->end) {
+		return NULL;
+	}
+
+	unsigned long long first = read64(t->map + HEADER_LEN + t->start * RECORD_BYTES);
+	unsigned long long last = read64(t->map + HEADER_LEN + (t->end - 1) * RECORD_BYTES);
 
 	long long seq = 0;
 	long long percent = -1;
@@ -169,7 +185,16 @@ void *run_tile(void *p) {
 
 			if (t->tiles[z].x != tx || t->tiles[z].y != ty) {
 				if (t->tiles[z].active) {
-					make_tile(t->outdb, t->tiles[z], z, t->detail, t->square);
+					unsigned long long first_for_tile, last_for_tile;
+					calc_tile_edges(z, t->tiles[z].x, t->tiles[z].y, first_for_tile, last_for_tile);
+
+					// printf("%zu/%lld/%lld: %llx (%llx %llx) %llx\n", z, t->tiles[z].x, t->tiles[z].y, first, first_for_tile, last_for_tile, last);
+
+					if (first_for_tile >= first && last_for_tile <= last) {
+						make_tile(t->outdb, t->tiles[z], z, t->detail, t->square);
+					} else {
+						t->partial_tiles.push_back(t->tiles[z]);
+					}
 				}
 
 				t->tiles[z].active = true;
@@ -191,7 +216,16 @@ void *run_tile(void *p) {
 
 	for (size_t z = 0; z < t->zooms; z++) {
 		if (t->tiles[z].active) {
-			make_tile(t->outdb, t->tiles[z], z, t->detail, t->square);
+			unsigned long long first_for_tile, last_for_tile;
+			calc_tile_edges(z, t->tiles[z].x, t->tiles[z].y, first_for_tile, last_for_tile);
+
+			// printf("%zu/%lld/%lld: %llx (%llx %llx) %llx\n", z, t->tiles[z].x, t->tiles[z].y, first, first_for_tile, last_for_tile, last);
+
+			if (first_for_tile >= first && last_for_tile <= last) {
+				make_tile(t->outdb, t->tiles[z], z, t->detail, t->square);
+			} else {
+				t->partial_tiles.push_back(t->tiles[z]);
+			}
 		}
 	}
 
