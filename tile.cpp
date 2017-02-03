@@ -299,7 +299,7 @@ int main(int argc, char **argv) {
 	}
 	sqlite3 *outdb = mbtiles_open(outfile, argv, false);
 
-	size_t detail = 9;
+	size_t detail = 8;
 	size_t zooms = zoom - detail + 1;
 	if (zoom < (signed) (detail + 1)) {
 		zooms = 1;
