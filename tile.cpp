@@ -433,8 +433,8 @@ int main(int argc, char **argv) {
 	tas.string = "count";
 
 	type_and_string tas2;
-	tas.type = VT_NUMBER;
-	tas.string = "density";
+	tas2.type = VT_NUMBER;
+	tas2.string = "density";
 
 	layermap_entry lme(0);
 	lme.file_keys.insert(tas);
