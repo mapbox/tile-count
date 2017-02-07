@@ -91,7 +91,19 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square,
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 			if (count != 0) {
-				size_t bucket = (std::lower_bound(values.begin(), values.end(), count) - values.begin()) * buckets / values.size();
+				auto bound = std::upper_bound(values.begin(), values.end(), count);
+				size_t index;
+
+				if (bound == values.end()) {
+					index = values.size() - 1;
+				} else if (bound == values.begin()) {
+					fprintf(stderr, "Shouldn't have been able to find the first element\n");
+					exit(EXIT_FAILURE);
+				} else {
+					index = bound - values.begin() - 1;
+				}
+
+				size_t bucket = index * buckets / values.size();
 				// printf("%lld: %zu\n", count, bucket);
 				if (bucket >= features.size()) {
 					fprintf(stderr, "internal error: bucket lookup %zu in %zu\n", bucket, features.size());
@@ -117,47 +129,53 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square,
 
 	double scale = exp(log(2.5) * (z - maxzoom));
 
-	for (size_t i = 0; i < features.size(); i++) {
+#define FIRST_PERCENTILE 5
+
+	for (size_t i = FIRST_PERCENTILE; i < features.size(); i++) {
 		if (features[i].geometry.size() != 0) {
 			{
 				mvt_value val;
-				val.type = mvt_uint;
-				val.numeric_value.uint_value = largest[i] * scale;
+				val.type = mvt_double;
+				val.numeric_value.double_value = largest[i] * scale;
 				layer.tag(features[i], "density", val);
 			}
 
+#if 0
 			{
 				mvt_value val;
 				val.type = mvt_uint;
 				val.numeric_value.uint_value = largest[i];
 				layer.tag(features[i], "count", val);
 			}
+#endif
 
 			layer.features.push_back(features[i]);
 		}
 	}
 
-	mvt_tile mvt;
-	mvt.layers.push_back(layer);
+	if (layer.features.size() > 0) {
+		mvt_tile mvt;
+		mvt.layers.push_back(layer);
 
-	std::string compressed = mvt.encode();
-	if (compressed.size() > 500000) {
-		fprintf(stderr, "Tile is too big: %zu\n", compressed.size());
-		exit(EXIT_FAILURE);
-	}
+		std::string compressed = mvt.encode();
+		if (compressed.size() > 500000) {
+			fprintf(stderr, "Tile is too big: %zu\n", compressed.size());
+			exit(EXIT_FAILURE);
+		}
 
-	static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;
+		static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;
 
-	if (pthread_mutex_lock(&db_lock) != 0) {
-		perror("pthread_mutex_lock");
-		exit(EXIT_FAILURE);
-	}
+		if (pthread_mutex_lock(&db_lock) != 0) {
+			perror("pthread_mutex_lock");
+			exit(EXIT_FAILURE);
+		}
 
-	mbtiles_write_tile(outdb, z, tile.x, tile.y, compressed.data(), compressed.size());
+		mbtiles_write_tile(outdb, z, tile.x, tile.y, compressed.data(), compressed.size());
 
-	if (pthread_mutex_unlock(&db_lock) != 0) {
-		perror("pthread_mutex_unlock");
-		exit(EXIT_FAILURE);
+		if (pthread_mutex_unlock(&db_lock) != 0) {
+			perror("pthread_mutex_unlock");
+			exit(EXIT_FAILURE);
+		}
 	}
 }
 
