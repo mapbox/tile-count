@@ -8,6 +8,7 @@
 #include <vector>
 #include <set>
 #include <map>
+#include <algorithm>
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/mman.h>
@@ -65,37 +66,74 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square,
 	layer.version = 2;
 	layer.extent = 4096;
 
-	double scale = exp(log(2.5) * (z - maxzoom));
+	std::vector<long long> values;
+	for (size_t y = 0; y < (1U << detail); y++) {
+		for (size_t x = 0; x < (1U << detail); x++) {
+			long long count = tile.count[y * (1 << detail) + x];
+			if (count != 0) {
+				values.push_back(count);
+			}
+		}
+	}
+
+	std::sort(values.begin(), values.end());
+
+	size_t buckets = 100;
+	std::vector<mvt_feature> features;
+	features.resize(buckets);
+
+	std::vector<long long> largest;
+	for (size_t i = 0; i < buckets; i++) {
+		largest.push_back(0);
+	}
 
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
-
 			if (count != 0) {
-				mvt_feature feature;
-				feature.type = mvt_point;
-				feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
+				size_t bucket = (std::lower_bound(values.begin(), values.end(), count) - values.begin()) * buckets / values.size();
+				// printf("%lld: %zu\n", count, bucket);
+				if (bucket >= features.size()) {
+					fprintf(stderr, "internal error: bucket lookup %zu in %zu\n", bucket, features.size());
+				}
+				mvt_feature &feature = features[bucket];
+
+				if (count > largest[bucket]) {
+					largest[bucket] = count;
+				}
 
 				if (square) {
 					feature.type = mvt_polygon;
+
+					feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
 					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 0) << (12 - detail)));
 					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 1) << (12 - detail)));
 					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 1) << (12 - detail)));
 					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 0) << (12 - detail)));
 				}
+			}
+		}
+	}
 
+	double scale = exp(log(2.5) * (z - maxzoom));
+
+	for (size_t i = 0; i < features.size(); i++) {
+		if (features[i].geometry.size() != 0) {
+			{
 				mvt_value val;
 				val.type = mvt_uint;
-				val.numeric_value.uint_value = count;
-				layer.tag(feature, "count", val);
-
-				mvt_value val2;
-				val2.type = mvt_uint;
-				val2.numeric_value.uint_value = count * scale;
-				layer.tag(feature, "density", val2);
-
-				layer.features.push_back(feature);
+				val.numeric_value.uint_value = largest[i] * scale;
+				layer.tag(features[i], "density", val);
 			}
+
+			{
+				mvt_value val;
+				val.type = mvt_uint;
+				val.numeric_value.uint_value = largest[i];
+				layer.tag(features[i], "count", val);
+			}
+
+			layer.features.push_back(features[i]);
 		}
 	}
 
@@ -262,7 +300,7 @@ int main(int argc, char **argv) {
 	char *outfile = NULL;
 	int zoom = -1;
 	bool force = false;
-	bool square = false;
+	bool square = true;
 
 	int i;
 	while ((i = getopt(argc, argv, "fz:o:s")) != -1) {
@@ -299,7 +337,7 @@ int main(int argc, char **argv) {
 	}
 	sqlite3 *outdb = mbtiles_open(outfile, argv, false);
 
-	size_t detail = 8;
+	size_t detail = 9;
 	size_t zooms = zoom - detail + 1;
 	if (zoom < (signed) (detail + 1)) {
 		zooms = 1;
