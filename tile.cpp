@@ -60,6 +60,65 @@ struct tiler {
 	size_t cpus;
 };
 
+std::vector<mvt_geometry> merge_rings(std::vector<mvt_geometry> g) {
+	std::multimap<mvt_geometry, mvt_geometry> trimmed;
+
+	for (size_t i = 1; i < g.size(); i++) {
+		if (g[i].op == mvt_lineto) {
+			bool found = false;
+
+			auto r = trimmed.equal_range(g[i]);
+			for (auto a = r.first; a != r.second; a++) {
+				if (a->second == g[i - 1]) {
+					found = true;
+					trimmed.erase(a);
+					break;
+				}
+			}
+
+			if (!found) {
+				trimmed.insert(std::pair<mvt_geometry, mvt_geometry>(g[i - 1], g[i]));
+			}
+		}
+	}
+
+	std::vector<mvt_geometry> out;
+
+	while (trimmed.size() != 0) {
+		auto a = trimmed.begin();
+		mvt_geometry start = a->first;
+		mvt_geometry here = a->second;
+		trimmed.erase(a);
+		out.push_back(mvt_geometry(mvt_moveto, start.x, start.y));
+		out.push_back(mvt_geometry(mvt_lineto, here.x, here.y));
+
+		while (1) {
+			auto there = trimmed.find(here);
+			if (there == trimmed.end()) {
+				fprintf(stderr, "Internal error: no path");
+				for (size_t i = 0; i < g.size(); i++) {
+					if (g[i].op == mvt_moveto) {
+						fprintf(stderr, "\n");
+					}
+					fprintf(stderr, "%d,%d ", g[i].x, g[i].y);
+				}
+				fprintf(stderr, "\n");
+				exit(EXIT_FAILURE);
+			}
+
+			here = there->second;
+			trimmed.erase(there);
+			out.push_back(mvt_geometry(mvt_lineto, here.x, here.y));
+
+			if (here == start) {
+				break;
+			}
+		}
+	}
+
+	return out;
+}
+
 void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square, int maxzoom) {
 	mvt_layer layer;
 	layer.name = "count";
@@ -133,6 +192,8 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square,
 
 	for (size_t i = FIRST_PERCENTILE; i < features.size(); i++) {
 		if (features[i].geometry.size() != 0) {
+			features[i].geometry = merge_rings(features[i].geometry);
+
 			{
 				mvt_value val;
 				val.type = mvt_double;
