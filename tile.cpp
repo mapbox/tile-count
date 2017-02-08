@@ -17,6 +17,7 @@
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
+#include "kll.hpp"
 #include "tippecanoe/mvt.hpp"
 #include "tippecanoe/mbtiles.hpp"
 
@@ -43,6 +44,8 @@ struct tile {
 struct tiler {
 	std::vector<tile> tiles;
 	std::vector<tile> partial_tiles;
+	std::vector<kll<long long>> quantiles;
+	size_t pass;
 	size_t start;
 	size_t end;
 	long long bbox[4];
@@ -119,6 +122,9 @@ std::vector<mvt_geometry> merge_rings(std::vector<mvt_geometry> g) {
 	return out;
 }
 
+void gather_quantile(kll<long long> &kll, tile const &tile) {
+}
+
 void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square, int maxzoom) {
 	mvt_layer layer;
 	layer.name = "count";
@@ -192,7 +198,7 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square,
 
 	for (size_t i = FIRST_PERCENTILE; i < features.size(); i++) {
 		if (features[i].geometry.size() != 0) {
-			features[i].geometry = merge_rings(features[i].geometry);
+			// features[i].geometry = merge_rings(features[i].geometry);
 
 			{
 				mvt_value val;
@@ -285,7 +291,7 @@ void *run_tile(void *p) {
 			}
 			sum /= t->cpus;
 
-			fprintf(stderr, "  %d%%\r", sum);
+			fprintf(stderr, "  %lu%%\r", sum / 2 + 50 * t->pass);
 		}
 
 		unsigned wx, wy;
@@ -331,7 +337,11 @@ void *run_tile(void *p) {
 					// printf("%zu/%lld/%lld: %llx (%llx %llx) %llx\n", z, t->tiles[z].x, t->tiles[z].y, first, first_for_tile, last_for_tile, last);
 
 					if (first_for_tile >= first && last_for_tile <= last) {
-						make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
+						if (t->pass == 0) {
+							gather_quantile(t->quantiles[z], t->tiles[z]);
+						} else {
+							make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
+						}
 					} else {
 						t->partial_tiles.push_back(t->tiles[z]);
 					}
@@ -362,7 +372,11 @@ void *run_tile(void *p) {
 			// printf("%zu/%lld/%lld: %llx (%llx %llx) %llx\n", z, t->tiles[z].x, t->tiles[z].y, first, first_for_tile, last_for_tile, last);
 
 			if (first_for_tile >= first && last_for_tile <= last) {
-				make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
+				if (t->pass == 0) {
+					gather_quantile(t->quantiles[z], t->tiles[z]);
+				} else {
+					make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
+				}
 			} else {
 				t->partial_tiles.push_back(t->tiles[z]);
 			}
@@ -423,50 +437,54 @@ int main(int argc, char **argv) {
 		detail = zoom;
 	}
 
-	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
-	volatile int progress[cpus];
-	std::vector<tiler> tilers;
-	tilers.resize(cpus);
-
-	for (size_t j = 0; j < cpus; j++) {
-		for (size_t z = 0; z < zooms; z++) {
-			tilers[j].tiles.push_back(tile(detail, z));
-		}
-		tilers[j].bbox[0] = tilers[j].bbox[1] = UINT_MAX;
-		tilers[j].bbox[2] = tilers[j].bbox[3] = 0;
-		tilers[j].midx = tilers[j].midy = 0;
-		tilers[j].zooms = zooms;
-		tilers[j].detail = detail;
-		tilers[j].outdb = outdb;
-		tilers[j].square = square;
-		tilers[j].progress = progress;
-		tilers[j].progress[j] = 0;
-		tilers[j].cpus = cpus;
-		tilers[j].shard = j;
-		tilers[j].maxzoom = zooms - 1;
+	struct stat st;
+	if (stat(argv[optind], &st) != 0) {
+		perror(optind[argv]);
+		exit(EXIT_FAILURE);
 	}
 
-	for (; optind < argc; optind++) {
-		struct stat st;
-		if (stat(argv[optind], &st) != 0) {
-			perror(optind[argv]);
-			exit(EXIT_FAILURE);
-		}
+	int fd = open(argv[optind], O_RDONLY);
+	if (fd < 0) {
+		perror(argv[optind]);
+		exit(EXIT_FAILURE);
+	}
+	unsigned char *map = (unsigned char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (map == MAP_FAILED) {
+		perror("mmap");
+		exit(EXIT_FAILURE);
+	}
 
-		int fd = open(argv[optind], O_RDONLY);
-		if (fd < 0) {
-			perror(argv[optind]);
-			exit(EXIT_FAILURE);
-		}
-		unsigned char *map = (unsigned char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-		if (map == MAP_FAILED) {
-			perror("mmap");
-			exit(EXIT_FAILURE);
-		}
+	if (memcmp(map, header_text, HEADER_LEN) != 0) {
+		fprintf(stderr, "%s: not a tile-count file\n", argv[optind]);
+		exit(EXIT_FAILURE);
+	}
 
-		if (memcmp(map, header_text, HEADER_LEN) != 0) {
-			fprintf(stderr, "%s: not a tile-count file\n", argv[optind]);
-			exit(EXIT_FAILURE);
+	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
+	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;
+
+	for (size_t pass = 0; pass < 2; pass++) {
+		volatile int progress[cpus];
+		std::vector<tiler> tilers;
+		tilers.resize(cpus);
+
+		for (size_t j = 0; j < cpus; j++) {
+			for (size_t z = 0; z < zooms; z++) {
+				tilers[j].tiles.push_back(tile(detail, z));
+				tilers[j].quantiles.push_back(kll<long long>());
+			}
+			tilers[j].bbox[0] = tilers[j].bbox[1] = UINT_MAX;
+			tilers[j].bbox[2] = tilers[j].bbox[3] = 0;
+			tilers[j].midx = tilers[j].midy = 0;
+			tilers[j].zooms = zooms;
+			tilers[j].detail = detail;
+			tilers[j].outdb = outdb;
+			tilers[j].square = square;
+			tilers[j].progress = progress;
+			tilers[j].progress[j] = 0;
+			tilers[j].cpus = cpus;
+			tilers[j].shard = j;
+			tilers[j].maxzoom = zooms - 1;
+			tilers[j].pass = pass;
 		}
 
 		size_t records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
@@ -495,55 +513,60 @@ int main(int argc, char **argv) {
 				exit(EXIT_FAILURE);
 			}
 		}
-	}
 
-	// Collect and consolidate partially counted tiles
+		// Collect and consolidate partially counted tiles
 
-	std::map<std::vector<unsigned>, tile> partials;
-	for (size_t j = 0; j < cpus; j++) {
-		for (size_t k = 0; k < tilers[j].partial_tiles.size(); k++) {
-			std::vector<unsigned> key;
-			key.push_back(tilers[j].partial_tiles[k].z);
-			key.push_back(tilers[j].partial_tiles[k].x);
-			key.push_back(tilers[j].partial_tiles[k].y);
+		std::map<std::vector<unsigned>, tile> partials;
+		for (size_t j = 0; j < cpus; j++) {
+			for (size_t k = 0; k < tilers[j].partial_tiles.size(); k++) {
+				std::vector<unsigned> key;
+				key.push_back(tilers[j].partial_tiles[k].z);
+				key.push_back(tilers[j].partial_tiles[k].x);
+				key.push_back(tilers[j].partial_tiles[k].y);
 
-			auto a = partials.find(key);
+				auto a = partials.find(key);
 
-			if (a == partials.end()) {
-				partials.insert(std::pair<std::vector<unsigned>, tile>(key, tilers[j].partial_tiles[k]));
-			} else {
-				for (size_t x = 0; x < (1U << detail) * (1U << detail); x++) {
-					a->second.count[x] += tilers[j].partial_tiles[k].count[x];
+				if (a == partials.end()) {
+					partials.insert(std::pair<std::vector<unsigned>, tile>(key, tilers[j].partial_tiles[k]));
+				} else {
+					for (size_t x = 0; x < (1U << detail) * (1U << detail); x++) {
+						a->second.count[x] += tilers[j].partial_tiles[k].count[x];
+					}
 				}
 			}
 		}
+
+		for (auto a = partials.begin(); a != partials.end(); a++) {
+			if (pass == 0) {
+				gather_quantile(tilers[0].quantiles[a->second.z], a->second);
+			} else {
+				make_tile(outdb, a->second, a->second.z, detail, square, zooms - 1);
+			}
+		}
+
+		if (pass == 0) {
+		} else {
+			long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
+			for (size_t j = 0; j < cpus; j++) {
+				if (tilers[j].bbox[0] < file_bbox[0]) {
+					file_bbox[0] = tilers[j].bbox[0];
+				}
+				if (tilers[j].bbox[1] < file_bbox[1]) {
+					file_bbox[1] = tilers[j].bbox[1];
+				}
+				if (tilers[j].bbox[2] > file_bbox[2]) {
+					file_bbox[2] = tilers[j].bbox[2];
+				}
+				if (tilers[j].bbox[3] > file_bbox[3]) {
+					file_bbox[3] = tilers[j].bbox[3];
+				}
+			}
+
+			tile2lonlat(tilers[0].midx, tilers[0].midy, 32, &midlon, &midlat);  // XXX unstable
+			tile2lonlat(file_bbox[0], file_bbox[1], 32, &minlon, &maxlat);
+			tile2lonlat(file_bbox[2], file_bbox[3], 32, &maxlon, &minlat);
+		}
 	}
-
-	for (auto a = partials.begin(); a != partials.end(); a++) {
-		make_tile(outdb, a->second, a->second.z, detail, square, zooms - 1);
-	}
-
-	long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
-	for (size_t j = 0; j < cpus; j++) {
-		if (tilers[j].bbox[0] < file_bbox[0]) {
-			file_bbox[0] = tilers[j].bbox[0];
-		}
-		if (tilers[j].bbox[1] < file_bbox[1]) {
-			file_bbox[1] = tilers[j].bbox[1];
-		}
-		if (tilers[j].bbox[2] > file_bbox[2]) {
-			file_bbox[2] = tilers[j].bbox[2];
-		}
-		if (tilers[j].bbox[3] > file_bbox[3]) {
-			file_bbox[3] = tilers[j].bbox[3];
-		}
-	}
-
-	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;
-
-	tile2lonlat(tilers[0].midx, tilers[0].midy, 32, &midlon, &midlat);  // XXX unstable
-	tile2lonlat(file_bbox[0], file_bbox[1], 32, &minlon, &maxlat);
-	tile2lonlat(file_bbox[2], file_bbox[3], 32, &maxlon, &minlat);
 
 	type_and_string tas;
 	tas.type = VT_NUMBER;
