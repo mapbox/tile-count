@@ -45,7 +45,8 @@ struct tiler {
 	std::vector<tile> tiles;
 	std::vector<tile> partial_tiles;
 	std::vector<kll<long long>> quantiles;
-	std::vector<long long> max;
+	std::vector<long long> max; // for this thread
+	std::vector<long long> zoom_max; // global on 2nd pass
 	size_t pass;
 	size_t start;
 	size_t end;
@@ -136,11 +137,20 @@ void gather_quantile(kll<long long> &kll, tile const &tile, int detail, long lon
 	}
 }
 
-void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square, int maxzoom) {
+void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, bool square, int maxzoom, long long zoom_max) {
 	mvt_layer layer;
 	layer.name = "count";
 	layer.version = 2;
 	layer.extent = 4096;
+
+	for (size_t y = 0; y < (1U << detail); y++) {
+		for (size_t x = 0; x < (1U << detail); x++) {
+			long long count = tile.count[y * (1 << detail) + x];
+
+			count = sqrt(100 * 100 * count / zoom_max);
+			tile.count[y * (1 << detail) + x] = count;
+		}
+	}
 
 	std::vector<long long> values;
 	for (size_t y = 0; y < (1U << detail); y++) {
@@ -203,18 +213,14 @@ void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square,
 		}
 	}
 
-	double scale = exp(log(2.5) * (z - maxzoom));
-
-#define FIRST_PERCENTILE 5
-
-	for (size_t i = FIRST_PERCENTILE; i < features.size(); i++) {
+	for (size_t i = 1; i < features.size(); i++) {
 		if (features[i].geometry.size() != 0) {
 			// features[i].geometry = merge_rings(features[i].geometry);
 
 			{
 				mvt_value val;
 				val.type = mvt_double;
-				val.numeric_value.double_value = largest[i] * scale;
+				val.numeric_value.double_value = largest[i];
 				layer.tag(features[i], "density", val);
 			}
 
@@ -351,7 +357,7 @@ void *run_tile(void *p) {
 						if (t->pass == 0) {
 							gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 						} else {
-							make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
+							make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom, t->zoom_max[z]);
 						}
 					} else {
 						t->partial_tiles.push_back(t->tiles[z]);
@@ -386,7 +392,7 @@ void *run_tile(void *p) {
 				if (t->pass == 0) {
 					gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 				} else {
-					make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
+					make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom, t->zoom_max[z]);
 				}
 			} else {
 				t->partial_tiles.push_back(t->tiles[z]);
@@ -472,6 +478,7 @@ int main(int argc, char **argv) {
 
 	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;
+	std::vector<long long> zoom_max;
 
 	for (size_t pass = 0; pass < 2; pass++) {
 		volatile int progress[cpus];
@@ -497,6 +504,7 @@ int main(int argc, char **argv) {
 			tilers[j].shard = j;
 			tilers[j].maxzoom = zooms - 1;
 			tilers[j].pass = pass;
+			tilers[j].zoom_max = zoom_max;
 		}
 
 		size_t records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
@@ -552,7 +560,7 @@ int main(int argc, char **argv) {
 			if (pass == 0) {
 				gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail, tilers[0].max[a->second.z]);
 			} else {
-				make_tile(outdb, a->second, a->second.z, detail, square, zooms - 1);
+				make_tile(outdb, a->second, a->second.z, detail, square, zooms - 1, zoom_max[a->second.z]);
 			}
 		}
 
@@ -572,22 +580,7 @@ int main(int argc, char **argv) {
 				}
 
 				std::vector<std::pair<double, long long>> cdf = quantiles[z].cdf();
-#if 0
-				for (size_t q = 0; q < cdf.size(); q++) {
-					if (q == 0 || cdf[q].second != cdf[q - 1].second) {
-						printf("%.15f %lld\n", cdf[q].first, cdf[q].second);
-					}
-				}
-#endif
-#if 0
-				for (double q = 0; q <= 1; q += .1) {
-					auto a = std::lower_bound(cdf.begin(), cdf.end(), std::pair<double, long long>(q, 0));
-					printf("%lld ", a->second);
-				}
-#endif
-				printf("%zu %lld %lld\n", z, cdf[cdf.size() - 1].second, max[z]);
-				fflush(stdout);
-				printf("\n");
+				zoom_max.push_back(cdf[cdf.size() - 1].second);
 			}
 		} else {
 			long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
@@ -612,17 +605,20 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	layermap_entry lme(0);
+
+#if 0
 	type_and_string tas;
 	tas.type = VT_NUMBER;
 	tas.string = "count";
+	lme.file_keys.insert(tas);
+#endif
 
 	type_and_string tas2;
 	tas2.type = VT_NUMBER;
 	tas2.string = "density";
-
-	layermap_entry lme(0);
-	lme.file_keys.insert(tas);
 	lme.file_keys.insert(tas2);
+
 	lme.minzoom = 0;
 	lme.maxzoom = zooms - 1;
 
