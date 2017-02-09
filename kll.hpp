@@ -10,7 +10,7 @@
 template <typename T>
 class kll {
 	std::vector<std::vector<T>> compactors;
-	size_t k = 128;
+	size_t k = 512;
 	double c = 2.0 / 3.0;
 	size_t H = 0;
 	size_t size = 0;

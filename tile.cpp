@@ -45,6 +45,7 @@ struct tiler {
 	std::vector<tile> tiles;
 	std::vector<tile> partial_tiles;
 	std::vector<kll<long long>> quantiles;
+	std::vector<long long> max;
 	size_t pass;
 	size_t start;
 	size_t end;
@@ -122,11 +123,15 @@ std::vector<mvt_geometry> merge_rings(std::vector<mvt_geometry> g) {
 	return out;
 }
 
-void gather_quantile(kll<long long> &kll, tile const &tile, int detail) {
+void gather_quantile(kll<long long> &kll, tile const &tile, int detail, long long &max) {
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 			kll.update(count);
+
+			if (count > max) {
+				max = count;
+			}
 		}
 	}
 }
@@ -344,7 +349,7 @@ void *run_tile(void *p) {
 
 					if (first_for_tile >= first && last_for_tile <= last) {
 						if (t->pass == 0) {
-							gather_quantile(t->quantiles[z], t->tiles[z], t->detail);
+							gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 						} else {
 							make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
 						}
@@ -379,7 +384,7 @@ void *run_tile(void *p) {
 
 			if (first_for_tile >= first && last_for_tile <= last) {
 				if (t->pass == 0) {
-					gather_quantile(t->quantiles[z], t->tiles[z], t->detail);
+					gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 				} else {
 					make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
 				}
@@ -477,6 +482,7 @@ int main(int argc, char **argv) {
 			for (size_t z = 0; z < zooms; z++) {
 				tilers[j].tiles.push_back(tile(detail, z));
 				tilers[j].quantiles.push_back(kll<long long>());
+				tilers[j].max.push_back(0);
 			}
 			tilers[j].bbox[0] = tilers[j].bbox[1] = UINT_MAX;
 			tilers[j].bbox[2] = tilers[j].bbox[3] = 0;
@@ -544,7 +550,7 @@ int main(int argc, char **argv) {
 
 		for (auto a = partials.begin(); a != partials.end(); a++) {
 			if (pass == 0) {
-				gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail);
+				gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail, tilers[0].max[a->second.z]);
 			} else {
 				make_tile(outdb, a->second, a->second.z, detail, square, zooms - 1);
 			}
@@ -552,21 +558,26 @@ int main(int argc, char **argv) {
 
 		if (pass == 0) {
 			std::vector<kll<long long>> quantiles;
+			std::vector<long long> max;
 			quantiles.resize(zooms);
 
-			for (size_t z = zooms - 1; z < zooms; z++) {
+			for (size_t z = 0; z < zooms; z++) {
+				max.push_back(0);
+
 				for (size_t c = 0; c < tilers.size(); c++) {
 					quantiles[z].merge(tilers[c].quantiles[z]);
+					if (tilers[c].max[z] > max[z]) {
+						max[z] = tilers[c].max[z];
+					}
 				}
 
 				std::vector<std::pair<double, long long>> cdf = quantiles[z].cdf();
-#if 1
+#if 0
 				for (size_t q = 0; q < cdf.size(); q++) {
 					if (q == 0 || cdf[q].second != cdf[q - 1].second) {
 						printf("%.15f %lld\n", cdf[q].first, cdf[q].second);
 					}
 				}
-				fflush(stdout);
 #endif
 #if 0
 				for (double q = 0; q <= 1; q += .1) {
@@ -574,6 +585,8 @@ int main(int argc, char **argv) {
 					printf("%lld ", a->second);
 				}
 #endif
+				printf("%zu %lld %lld\n", z, cdf[cdf.size() - 1].second, max[z]);
+				fflush(stdout);
 				printf("\n");
 			}
 		} else {
