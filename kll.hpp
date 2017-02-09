@@ -69,7 +69,7 @@ class kll {
 			grow();
 		}
 
-		for (size_t h = 0; t.compactors.size(); h++) {
+		for (size_t h = 0; h < t.compactors.size(); h++) {
 			compactors[h].insert(compactors[h].end(), t.compactors[h].begin(), t.compactors[h].end());
 		}
 
@@ -104,7 +104,7 @@ class kll {
 		return ret;
 	}
 
-	std::vector<std::pair<T, double>> cdf() {
+	std::vector<std::pair<double, T>> cdf() {
 		std::multimap<T, double> iw;
 
 		double total_weight = 0;
@@ -117,12 +117,12 @@ class kll {
 			}
 		}
 
-		std::vector<std::pair<T, double>> ret;
+		std::vector<std::pair<double, T>> ret;
 		double cumulative = 0;
 
 		for (auto a = iw.begin(); a != iw.end(); a++) {
 			cumulative += a->second;
-			ret.push_back(std::pair<T, double>(a->first, cumulative / total_weight));
+			ret.push_back(std::pair<double, T>(cumulative / total_weight, a->first));
 		}
 
 		return ret;

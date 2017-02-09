@@ -122,7 +122,15 @@ std::vector<mvt_geometry> merge_rings(std::vector<mvt_geometry> g) {
 	return out;
 }
 
-void gather_quantile(kll<long long> &kll, tile const &tile) {
+void gather_quantile(kll<long long> &kll, tile const &tile, int detail) {
+	for (size_t y = 0; y < (1U << detail); y++) {
+		for (size_t x = 0; x < (1U << detail); x++) {
+			long long count = tile.count[y * (1 << detail) + x];
+			if (count != 0) {
+				kll.update(count);
+			}
+		}
+	}
 }
 
 void make_tile(sqlite3 *outdb, tile const &tile, int z, int detail, bool square, int maxzoom) {
@@ -338,7 +346,7 @@ void *run_tile(void *p) {
 
 					if (first_for_tile >= first && last_for_tile <= last) {
 						if (t->pass == 0) {
-							gather_quantile(t->quantiles[z], t->tiles[z]);
+							gather_quantile(t->quantiles[z], t->tiles[z], t->detail);
 						} else {
 							make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
 						}
@@ -373,7 +381,7 @@ void *run_tile(void *p) {
 
 			if (first_for_tile >= first && last_for_tile <= last) {
 				if (t->pass == 0) {
-					gather_quantile(t->quantiles[z], t->tiles[z]);
+					gather_quantile(t->quantiles[z], t->tiles[z], t->detail);
 				} else {
 					make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom);
 				}
@@ -538,13 +546,35 @@ int main(int argc, char **argv) {
 
 		for (auto a = partials.begin(); a != partials.end(); a++) {
 			if (pass == 0) {
-				gather_quantile(tilers[0].quantiles[a->second.z], a->second);
+				gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail);
 			} else {
 				make_tile(outdb, a->second, a->second.z, detail, square, zooms - 1);
 			}
 		}
 
 		if (pass == 0) {
+			std::vector<kll<long long>> quantiles;
+			quantiles.resize(zooms);
+
+			for (size_t z = zooms - 1; z < zooms; z++) {
+				for (size_t c = 0; c < tilers.size(); c++) {
+					quantiles[z].merge(tilers[c].quantiles[z]);
+				}
+
+				std::vector<std::pair<double, long long>> cdf = quantiles[z].cdf();
+#if 1
+				for (size_t q = 0; q < cdf.size(); q++) {
+					printf("%f %lld\n", cdf[q].first, cdf[q].second);
+				}
+#endif
+#if 0
+				for (double q = 0; q <= 1; q += .1) {
+					auto a = std::lower_bound(cdf.begin(), cdf.end(), std::pair<double, long long>(q, 0));
+					printf("%lld ", a->second);
+				}
+#endif
+				printf("\n");
+			}
 		} else {
 			long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
 			for (size_t j = 0; j < cpus; j++) {
