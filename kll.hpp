@@ -15,6 +15,7 @@ class kll {
 	size_t H = 0;
 	size_t size = 0;
 	size_t maxSize = 0;
+	size_t zeroes = 0;
 
        public:
 	kll() {
@@ -36,10 +37,14 @@ class kll {
 	}
 
 	void update(T value) {
-		compactors[0].push_back(value);
-		size++;
-		while (size >= maxSize) {
-			compact();
+		if (value == 0) {
+			zeroes++;
+		} else {
+			compactors[0].push_back(value);
+			size++;
+			while (size >= maxSize) {
+				compact();
+			}
 		}
 	}
 
@@ -65,6 +70,8 @@ class kll {
 	}
 
 	void merge(kll<T> &t) {
+		zeroes += t.zeroes;
+
 		while (H < t.H) {
 			grow();
 		}
@@ -108,6 +115,9 @@ class kll {
 		std::multimap<T, double> iw;
 
 		double total_weight = 0;
+
+		iw.insert(std::pair<T, double>(0, zeroes));
+		total_weight += zeroes;
 
 		for (size_t i = 0; i < compactors.size(); i++) {
 			for (size_t j = 0; j < compactors[i].size(); j++) {

@@ -126,9 +126,7 @@ void gather_quantile(kll<long long> &kll, tile const &tile, int detail) {
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
-			if (count != 0) {
-				kll.update(count);
-			}
+			kll.update(count);
 		}
 	}
 }
@@ -564,8 +562,11 @@ int main(int argc, char **argv) {
 				std::vector<std::pair<double, long long>> cdf = quantiles[z].cdf();
 #if 1
 				for (size_t q = 0; q < cdf.size(); q++) {
-					printf("%f %lld\n", cdf[q].first, cdf[q].second);
+					if (q == 0 || cdf[q].second != cdf[q - 1].second) {
+						printf("%.15f %lld\n", cdf[q].first, cdf[q].second);
+					}
 				}
+				fflush(stdout);
 #endif
 #if 0
 				for (double q = 0; q <= 1; q += .1) {
