@@ -143,62 +143,29 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, bool square, int m
 	layer.version = 2;
 	layer.extent = 4096;
 
+#define LEVELS 100
+
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 
-			count = sqrt(100 * 100 * count / zoom_max);
+			count = sqrt(LEVELS * LEVELS * count / zoom_max);
+			if (count > LEVELS - 1) {
+				count = LEVELS - 1;
+			}
+
 			tile.count[y * (1 << detail) + x] = count;
 		}
 	}
 
-	std::vector<long long> values;
-	for (size_t y = 0; y < (1U << detail); y++) {
-		for (size_t x = 0; x < (1U << detail); x++) {
-			long long count = tile.count[y * (1 << detail) + x];
-			if (count != 0) {
-				values.push_back(count);
-			}
-		}
-	}
-
-	std::sort(values.begin(), values.end());
-
-	size_t buckets = 100;
 	std::vector<mvt_feature> features;
-	features.resize(buckets);
-
-	std::vector<long long> largest;
-	for (size_t i = 0; i < buckets; i++) {
-		largest.push_back(0);
-	}
+	features.resize(LEVELS);
 
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 			if (count != 0) {
-				auto bound = std::upper_bound(values.begin(), values.end(), count);
-				size_t index;
-
-				if (bound == values.end()) {
-					index = values.size() - 1;
-				} else if (bound == values.begin()) {
-					fprintf(stderr, "Shouldn't have been able to find the first element\n");
-					exit(EXIT_FAILURE);
-				} else {
-					index = bound - values.begin() - 1;
-				}
-
-				size_t bucket = index * buckets / values.size();
-				// printf("%lld: %zu\n", count, bucket);
-				if (bucket >= features.size()) {
-					fprintf(stderr, "internal error: bucket lookup %zu in %zu\n", bucket, features.size());
-				}
-				mvt_feature &feature = features[bucket];
-
-				if (count > largest[bucket]) {
-					largest[bucket] = count;
-				}
+				mvt_feature &feature = features[count];
 
 				if (square) {
 					feature.type = mvt_polygon;
@@ -219,8 +186,8 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, bool square, int m
 
 			{
 				mvt_value val;
-				val.type = mvt_double;
-				val.numeric_value.double_value = largest[i];
+				val.type = mvt_uint;
+				val.numeric_value.uint_value = i;
 				layer.tag(features[i], "density", val);
 			}
 
