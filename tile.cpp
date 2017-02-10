@@ -22,8 +22,12 @@
 #include "tippecanoe/mvt.hpp"
 #include "tippecanoe/mbtiles.hpp"
 
+int levels = 50;
+int first_level = 6;
+double count_gamma = 2.5;
+
 void usage(char **argv) {
-	fprintf(stderr, "Usage: %s [-fs] -z zoom -o out.mbtiles file.count\n", argv[0]);
+	fprintf(stderr, "Usage: %s [options] -z zoom -o out.mbtiles file.count\n", argv[0]);
 }
 
 struct tile {
@@ -58,7 +62,6 @@ struct tiler {
 	size_t zooms;
 	size_t detail;
 	sqlite3 *outdb;
-	bool square;
 	int maxzoom;
 
 	volatile int *progress;
@@ -138,19 +141,15 @@ void gather_quantile(kll<long long> &kll, tile const &tile, int detail, long lon
 	}
 }
 
-#define LEVELS 50
-#define ROOT 2.5
-#define MIN_LEVEL 6
-
 inline double root(double val) {
 	if (val == 0) {
 		return 0;
 	} else {
-		return exp(log(val) / ROOT);
+		return exp(log(val) / count_gamma);
 	}
 }
 
-void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, bool square, int maxzoom, long long zoom_max) {
+void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long long zoom_max) {
 	mvt_layer layer;
 	layer.name = "count";
 	layer.version = 2;
@@ -160,9 +159,9 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, bool square, int m
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 
-			count = root(exp(log(LEVELS) * ROOT) * count / zoom_max);
-			if (count > LEVELS - 1) {
-				count = LEVELS - 1;
+			count = root(exp(log(levels) * count_gamma) * count / zoom_max);
+			if (count > levels - 1) {
+				count = levels - 1;
 			}
 
 			tile.count[y * (1 << detail) + x] = count;
@@ -170,28 +169,25 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, bool square, int m
 	}
 
 	std::vector<mvt_feature> features;
-	features.resize(LEVELS);
+	features.resize(levels);
 
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 			if (count != 0) {
 				mvt_feature &feature = features[count];
+				feature.type = mvt_polygon;
 
-				if (square) {
-					feature.type = mvt_polygon;
-
-					feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 0) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 1) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 1) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 0) << (12 - detail)));
-				}
+				feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
+				feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 0) << (12 - detail)));
+				feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 1) << (12 - detail)));
+				feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 1) << (12 - detail)));
+				feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 0) << (12 - detail)));
 			}
 		}
 	}
 
-	for (size_t i = MIN_LEVEL; i < features.size(); i++) {
+	for (size_t i = first_level; i < features.size(); i++) {
 		if (features[i].geometry.size() != 0) {
 			// features[i].geometry = merge_rings(features[i].geometry);
 
@@ -335,7 +331,7 @@ void *run_tile(void *p) {
 						if (t->pass == 0) {
 							gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 						} else {
-							make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom, t->zoom_max[z]);
+							make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z]);
 						}
 					} else {
 						t->partial_tiles.push_back(t->tiles[z]);
@@ -370,7 +366,7 @@ void *run_tile(void *p) {
 				if (t->pass == 0) {
 					gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 				} else {
-					make_tile(t->outdb, t->tiles[z], z, t->detail, t->square, t->maxzoom, t->zoom_max[z]);
+					make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z]);
 				}
 			} else {
 				t->partial_tiles.push_back(t->tiles[z]);
@@ -420,21 +416,33 @@ int main(int argc, char **argv) {
 	char *outfile = NULL;
 	int zoom = -1;
 	bool force = false;
-	bool square = true;
+	size_t detail = 9;
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:s")) != -1) {
+	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
 			break;
 
-		case 's':
-			square = true;
-			break;
-
 		case 'z':
 			zoom = atoi(optarg);
+			break;
+
+		case 'd':
+			detail = atoi(optarg);
+			break;
+
+		case 'l':
+			levels = atoi(optarg);
+			break;
+
+		case 'm':
+			first_level = atoi(optarg);
+			break;
+
+		case 'g':
+			count_gamma = atof(optarg);
 			break;
 
 		case 'o':
@@ -447,6 +455,12 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	if (zoom < (signed) (detail + 1)) {
+		fprintf(stderr, "%s: Detail (%zu) too low for zoom (%d)\n", argv[0], detail, zoom);
+		exit(EXIT_FAILURE);
+	}
+	size_t zooms = zoom - detail + 1;
+
 	if (optind + 1 != argc || zoom < 0 || outfile == NULL) {
 		usage(argv);
 		exit(EXIT_FAILURE);
@@ -456,13 +470,6 @@ int main(int argc, char **argv) {
 		unlink(outfile);
 	}
 	sqlite3 *outdb = mbtiles_open(outfile, argv, false);
-
-	size_t detail = 9;
-	size_t zooms = zoom - detail + 1;
-	if (zoom < (signed) (detail + 1)) {
-		zooms = 1;
-		detail = zoom;
-	}
 
 	struct stat st;
 	if (stat(argv[optind], &st) != 0) {
@@ -507,7 +514,6 @@ int main(int argc, char **argv) {
 			tilers[j].zooms = zooms;
 			tilers[j].detail = detail;
 			tilers[j].outdb = outdb;
-			tilers[j].square = square;
 			tilers[j].progress = progress;
 			tilers[j].progress[j] = 0;
 			tilers[j].cpus = cpus;
@@ -572,7 +578,7 @@ int main(int argc, char **argv) {
 			if (pass == 0) {
 				gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail, tilers[0].max[a->second.z]);
 			} else {
-				make_tile(outdb, a->second, a->second.z, detail, square, zooms - 1, zoom_max[a->second.z]);
+				make_tile(outdb, a->second, a->second.z, detail, zooms - 1, zoom_max[a->second.z]);
 			}
 		}
 

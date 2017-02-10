@@ -50,16 +50,24 @@ Outputs the `lon,lat,count` CSV that would recreate `in.count`.
 Tiling
 ------
 
-    tile-count-tile [-fs] -o out.mbtiles -z zoom in.count
+    tile-count-tile [options] -o out.mbtiles -z zoom in.count
 
 The _zoom_ is the size of the bins, not the maximum zoom of the tileset,
 so for instance a `-z24` run would produce tiles of zooms 0 through 15.
 
-The features in the `mbtiles` are a grid of points with a `count` attribute
-indicating how many original points were accumulated into that binned point.
-The `-s` option generates square polygon bins instead of points.
+The maxzoom of the output tileset is _zoom_ minus _detail_.
+The default _detail_ is 9 if you don't specify one.
 
-The `-f` option deletes any existing file named `out.mbtiles`.
+The features in the `mbtiles` are a grid of squares with a `density` attribute
+indicating how many original points were accumulated into that binned point,
+normalized according the densest point in the zoom level.
+
+* `-f`: Delete any existing file named `out.mbtiles`.
+* `-z` *zoom*: Use buckets the size of a tile in zoom level *zoom*.
+* `-d` *detail*: Make the grid within each tile 2^detail points on each side. The default is 9.
+* `-l` *levels*: Quantize the normalized counts within each tile into the specified number of levels. The default is 50.
+* `-m` *level*: Don't include normalized counts that are quantized below the specified level. The default is 6.
+* `-g` *gamma*: Scale the counts within each tile to the gamma'th root of their linear value. The default is 2.5.
 
 Internal file format
 --------------------
