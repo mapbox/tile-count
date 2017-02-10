@@ -380,6 +380,33 @@ void *run_tile(void *p) {
 	return NULL;
 }
 
+void regress(std::vector<long long> &max) {
+	double sum_x = 0;
+	double sum_y = 0;
+	double sum_x2 = 0;
+	double sum_y2 = 0;
+	double sum_xy = 0;
+
+	for (size_t i = 0; i < max.size(); i++) {
+		double x = i;
+		double y = log(max[i]);
+
+		sum_x += x;
+		sum_y += y;
+		sum_xy += x * y;
+		sum_x2 += x * x;
+		sum_y2 += y * y;
+	}
+
+	double m = (max.size() * sum_xy - sum_x * sum_y) / (max.size() * sum_x2 - (sum_x * sum_x));
+	double b = (sum_y * sum_x2 - sum_x * sum_xy) / (max.size() * sum_x2 - (sum_x * sum_x));
+
+	for (size_t i = 0; i < max.size(); i++) {
+		printf("%zu %lld %f\n", i, max[i], exp(m * i + b));
+		max[i] = exp(m * i + b);
+	}
+}
+
 int main(int argc, char **argv) {
 	extern int optind;
 	extern char *optarg;
@@ -559,6 +586,8 @@ int main(int argc, char **argv) {
 				std::vector<std::pair<double, long long>> cdf = quantiles[z].cdf();
 				zoom_max.push_back(cdf[cdf.size() - 1].second);
 			}
+
+			regress(max);
 		} else {
 			long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
 			for (size_t j = 0; j < cpus; j++) {
