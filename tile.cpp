@@ -138,7 +138,7 @@ void gather_quantile(kll<long long> &kll, tile const &tile, int detail, long lon
 }
 
 #define LEVELS 50
-#define ROOT 3
+#define ROOT 2.5
 #define MIN_LEVEL 5
 
 inline double root(double val) {
