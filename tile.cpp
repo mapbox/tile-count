@@ -45,8 +45,8 @@ struct tiler {
 	std::vector<tile> tiles;
 	std::vector<tile> partial_tiles;
 	std::vector<kll<long long>> quantiles;
-	std::vector<long long> max; // for this thread
-	std::vector<long long> zoom_max; // global on 2nd pass
+	std::vector<long long> max;       // for this thread
+	std::vector<long long> zoom_max;  // global on 2nd pass
 	size_t pass;
 	size_t start;
 	size_t end;
@@ -137,19 +137,29 @@ void gather_quantile(kll<long long> &kll, tile const &tile, int detail, long lon
 	}
 }
 
+#define LEVELS 50
+#define ROOT 3
+#define MIN_LEVEL 5
+
+inline double root(double val) {
+	if (val == 0) {
+		return 0;
+	} else {
+		return exp(log(val) / ROOT);
+	}
+}
+
 void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, bool square, int maxzoom, long long zoom_max) {
 	mvt_layer layer;
 	layer.name = "count";
 	layer.version = 2;
 	layer.extent = 4096;
 
-#define LEVELS 100
-
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 
-			count = sqrt(LEVELS * LEVELS * count / zoom_max);
+			count = root(exp(log(LEVELS) * ROOT) * count / zoom_max);
 			if (count > LEVELS - 1) {
 				count = LEVELS - 1;
 			}
@@ -180,7 +190,7 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, bool square, int m
 		}
 	}
 
-	for (size_t i = 1; i < features.size(); i++) {
+	for (size_t i = MIN_LEVEL; i < features.size(); i++) {
 		if (features[i].geometry.size() != 0) {
 			// features[i].geometry = merge_rings(features[i].geometry);
 
