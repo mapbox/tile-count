@@ -15,6 +15,7 @@
 #include <limits.h>
 #include <math.h>
 #include <time.h>
+#include <png.h>
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
@@ -25,6 +26,10 @@
 int levels = 50;
 int first_level = 6;
 double count_gamma = 2.5;
+
+bool bitmap = false;
+int color = 0x888888;
+int white = 0;
 
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s [options] -z zoom -o out.mbtiles file.count\n", argv[0]);
@@ -149,11 +154,19 @@ inline double root(double val) {
 	}
 }
 
+void string_append(png_structp png_ptr, png_bytep data, png_size_t length) {
+	std::string *s = (std::string *) png_get_io_ptr(png_ptr);
+	s->append(std::string(data, data + length));
+}
+
+static void fail(png_structp png_ptr, png_const_charp error_msg) {
+	fprintf(stderr, "PNG error %s\n", error_msg);
+	exit(EXIT_FAILURE);
+}
+
 void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long long zoom_max) {
-	mvt_layer layer;
-	layer.name = "count";
-	layer.version = 2;
-	layer.extent = 4096;
+	bool anything = false;
+	std::string compressed;
 
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
@@ -165,38 +178,106 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long 
 			}
 
 			tile.count[y * (1 << detail) + x] = count;
-		}
-	}
-
-	std::vector<mvt_feature> features;
-	features.resize(levels);
-
-	for (size_t y = 0; y < (1U << detail); y++) {
-		for (size_t x = 0; x < (1U << detail); x++) {
-			long long count = tile.count[y * (1 << detail) + x];
-			if (count != 0) {
-				mvt_feature &feature = features[count];
-				feature.type = mvt_polygon;
-
-				feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
-				feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 0) << (12 - detail)));
-				feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 1) << (12 - detail)));
-				feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 1) << (12 - detail)));
-				feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 0) << (12 - detail)));
+			if (count != 0 && count >= first_level) {
+				anything = true;
 			}
 		}
 	}
 
-	for (size_t i = first_level; i < features.size(); i++) {
-		if (features[i].geometry.size() != 0) {
-			// features[i].geometry = merge_rings(features[i].geometry);
+	if (!anything) {
+		return;
+	}
 
-			{
-				mvt_value val;
-				val.type = mvt_uint;
-				val.numeric_value.uint_value = i;
-				layer.tag(features[i], "density", val);
+	if (bitmap) {
+		png_structp png_ptr;
+		png_infop info_ptr;
+
+		unsigned char *rows[1U << detail];
+		for (size_t y = 0; y < 1U << detail; y++) {
+			rows[y] = new unsigned char[4 * 1U << detail];
+
+			for (size_t x = 0; x < (1U << detail); x++) {
+				long long count = tile.count[y * (1 << detail) + x];
+				long long r, g, b, a;
+				int fg = white ? 0x00 : 0xFF;
+
+				if (count <= levels / 2) {
+					r = (color >> 16) & 0xFF;
+					g = (color >> 8) & 0xFF;
+					b = (color >> 0) & 0xFF;
+					a = 255 * count / (levels / 2);
+				} else {
+					double along = 255 * (count - levels / 2) / (levels - levels / 2) / 255.0;
+
+					r = ((color >> 16) & 0xFF) * along + fg * (1 - along);
+					g = ((color >> 8) & 0xFF) * along + fg * (1 - along);
+					b = ((color >> 0) & 0xFF) * along + fg * (1 - along);
+					a = 255;
+				}
+
+				rows[y][x * 4 + 0] = r;
+				rows[y][x * 4 + 1] = g;
+				rows[y][x * 4 + 2] = b;
+				rows[y][x * 4 + 3] = a;
 			}
+		}
+
+		png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
+		if (png_ptr == NULL) {
+			fprintf(stderr, "PNG failure (write struct)\n");
+			exit(EXIT_FAILURE);
+		}
+		info_ptr = png_create_info_struct(png_ptr);
+		if (info_ptr == NULL) {
+			png_destroy_write_struct(&png_ptr, NULL);
+			fprintf(stderr, "PNG failure (info struct)\n");
+			exit(EXIT_FAILURE);
+		} else {
+			png_set_IHDR(png_ptr, info_ptr, 1U << detail, 1U << detail, 8, PNG_COLOR_TYPE_RGB_ALPHA, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+			png_set_rows(png_ptr, info_ptr, rows);
+			png_set_write_fn(png_ptr, &compressed, string_append, NULL);
+			png_write_png(png_ptr, info_ptr, 0, NULL);
+			png_destroy_write_struct(&png_ptr, &info_ptr);
+		}
+
+		for (size_t i = 0; i < 1U << detail; i++) {
+			delete[] rows[i];
+		}
+	} else {
+		mvt_layer layer;
+		layer.name = "count";
+		layer.version = 2;
+		layer.extent = 4096;
+
+		std::vector<mvt_feature> features;
+		features.resize(levels);
+
+		for (size_t y = 0; y < (1U << detail); y++) {
+			for (size_t x = 0; x < (1U << detail); x++) {
+				long long count = tile.count[y * (1 << detail) + x];
+				if (count != 0) {
+					mvt_feature &feature = features[count];
+					feature.type = mvt_polygon;
+
+					feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 0) << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 1) << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 1) << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 0) << (12 - detail)));
+				}
+			}
+		}
+
+		for (size_t i = first_level; i < features.size(); i++) {
+			if (features[i].geometry.size() != 0) {
+				// features[i].geometry = merge_rings(features[i].geometry);
+
+				{
+					mvt_value val;
+					val.type = mvt_uint;
+					val.numeric_value.uint_value = i;
+					layer.tag(features[i], "density", val);
+				}
 
 #if 0
 			{
@@ -207,33 +288,39 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long 
 			}
 #endif
 
-			layer.features.push_back(features[i]);
+				layer.features.push_back(features[i]);
+			}
+		}
+
+		if (layer.features.size() > 0) {
+			mvt_tile mvt;
+			mvt.layers.push_back(layer);
+
+			compressed = mvt.encode();
 		}
 	}
 
-	if (layer.features.size() > 0) {
-		mvt_tile mvt;
-		mvt.layers.push_back(layer);
+	if (compressed.size() == 0) {
+		return;
+	}
 
-		std::string compressed = mvt.encode();
-		if (compressed.size() > 500000) {
-			fprintf(stderr, "Tile is too big: %zu\n", compressed.size());
-			exit(EXIT_FAILURE);
-		}
+	if (compressed.size() > 500000) {
+		fprintf(stderr, "Tile is too big: %zu\n", compressed.size());
+		exit(EXIT_FAILURE);
+	}
 
-		static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;
+	static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;
 
-		if (pthread_mutex_lock(&db_lock) != 0) {
-			perror("pthread_mutex_lock");
-			exit(EXIT_FAILURE);
-		}
+	if (pthread_mutex_lock(&db_lock) != 0) {
+		perror("pthread_mutex_lock");
+		exit(EXIT_FAILURE);
+	}
 
-		mbtiles_write_tile(outdb, z, tile.x, tile.y, compressed.data(), compressed.size());
+	mbtiles_write_tile(outdb, z, tile.x, tile.y, compressed.data(), compressed.size());
 
-		if (pthread_mutex_unlock(&db_lock) != 0) {
-			perror("pthread_mutex_unlock");
-			exit(EXIT_FAILURE);
-		}
+	if (pthread_mutex_unlock(&db_lock) != 0) {
+		perror("pthread_mutex_unlock");
+		exit(EXIT_FAILURE);
 	}
 }
 
@@ -419,7 +506,7 @@ int main(int argc, char **argv) {
 	size_t detail = 9;
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:")) != -1) {
+	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:bwc:")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -443,6 +530,18 @@ int main(int argc, char **argv) {
 
 		case 'g':
 			count_gamma = atof(optarg);
+			break;
+
+		case 'b':
+			bitmap = 1;
+			break;
+
+		case 'c':
+			color = strtoul(optarg, NULL, 16);
+			break;
+
+		case 'w':
+			white = 1;
 			break;
 
 		case 'o':
@@ -651,8 +750,10 @@ int main(int argc, char **argv) {
 	lme.maxzoom = zooms - 1;
 
 	std::map<std::string, layermap_entry> lm;
-	lm.insert(std::pair<std::string, layermap_entry>("count", lme));
+	if (!bitmap) {
+		lm.insert(std::pair<std::string, layermap_entry>("count", lme));
+	}
 
-	mbtiles_write_metadata(outdb, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm);
+	mbtiles_write_metadata(outdb, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, !bitmap);
 	mbtiles_close(outdb, argv);
 }
