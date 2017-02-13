@@ -207,11 +207,11 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long 
 					b = (color >> 0) & 0xFF;
 					a = 255 * count / (levels / 2);
 				} else {
-					double along = 255 * (count - levels / 2) / (levels - levels / 2) / 255.0;
+					double along = 255 * (count - levels / 2) / (levels - levels / 2 - 1) / 255.0;
 
-					r = ((color >> 16) & 0xFF) * along + fg * (1 - along);
-					g = ((color >> 8) & 0xFF) * along + fg * (1 - along);
-					b = ((color >> 0) & 0xFF) * along + fg * (1 - along);
+					r = ((color >> 16) & 0xFF) * (1 - along) + fg * (along);
+					g = ((color >> 8) & 0xFF) * (1 - along) + fg * (along);
+					b = ((color >> 0) & 0xFF) * (1 - along) + fg * (along);
 					a = 255;
 				}
 
