@@ -73,6 +73,11 @@ int main(int argc, char **argv) {
 		merges[i].map = maps[i];
 
 		to_sort += st.st_size - HEADER_LEN;
+
+		if (close(fds[i]) < 0) {
+			perror("close");
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	FILE *out = fopen(outfile, "wb");
