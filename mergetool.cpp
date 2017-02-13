@@ -71,7 +71,6 @@ int main(int argc, char **argv) {
 		merges[i].start = HEADER_LEN;
 		merges[i].end = st.st_size;
 		merges[i].map = maps[i];
-		merges[i].next = NULL;
 
 		to_sort += st.st_size - HEADER_LEN;
 	}

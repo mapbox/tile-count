@@ -160,7 +160,6 @@ void sort_and_merge(int fd, FILE *out, int zoom) {
 
 		merges[start / unit].start = start;
 		merges[start / unit].end = end;
-		merges[start / unit].next = NULL;
 		merges[start / unit].fd = fd;
 	}
 

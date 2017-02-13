@@ -4,7 +4,7 @@ struct merge {
 	unsigned char *map;  // used for merge
 	int fd;		     // used for sort
 
-	struct merge *next;
+	bool operator<(const merge &m) const;
 };
 
 void do_merge(struct merge *merges, int nmerges, FILE *f, int bytes, long long nrec, int zoom);
