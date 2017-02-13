@@ -216,7 +216,7 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *fname, int minzoom, int 
 		sqlite3_free(sql);
 	}
 
-	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('format', %Q);", vector ? "mvt" : "png");
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('format', %Q);", vector ? "pbf" : "png");
 	if (sqlite3_exec(outdb, sql, NULL, NULL, &err) != SQLITE_OK) {
 		fprintf(stderr, "set format: %s\n", err);
 		if (!forcetable) {
