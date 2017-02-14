@@ -184,7 +184,7 @@ void sort_and_merge(int fd, int out, int zoom) {
 		}
 	}
 
-	if (write(out, header_text, HEADER_LEN) != out) {
+	if (write(out, header_text, HEADER_LEN) != HEADER_LEN) {
 		perror("write header");
 		exit(EXIT_FAILURE);
 	}

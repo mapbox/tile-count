@@ -14,7 +14,7 @@ struct merger {
 	unsigned char *start;
 	unsigned char *end;
 
-        bool operator<(const merger &m) const {
+	bool operator<(const merger &m) const {
 		// > 0 so that lowest quadkey comes first
 		return memcmp(start, m.start, INDEX_BYTES) > 0;
 	}
@@ -106,7 +106,7 @@ void *run_merge(void *va) {
 		nrec += (a->mergers[i].end - a->mergers[i].start) / RECORD_BYTES;
 	}
 
-	do_merge1(a->mergers, a->mergers.size(), a->out, nrec, 12345, a->zoom);
+	do_merge1(a->mergers, a->mergers.size(), a->out + a->off, RECORD_BYTES, nrec, a->zoom);
 
 	return NULL;
 }
@@ -179,15 +179,15 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 
 	size_t off = HEADER_LEN;
 	for (size_t i = 0; i < cpus; i++) {
+		args[i].off = off;
+
 		for (size_t j = 0; j < nmerges; j++) {
 			printf("range: %zu: %zu\n", j, (args[i].mergers[j].end - args[i].mergers[j].start));
 			off += args[i].mergers[j].end - args[i].mergers[j].start;
 		}
-
-		args[i].off = off;
 	}
 
-	if (off != (size_t) (nrec * bytes + HEADER_LEN)) {
+	if (off != (size_t)(nrec * bytes + HEADER_LEN)) {
 		fprintf(stderr, "Internal error: Wrong total size: %zu vs %lld * %d == %lld\n", off, nrec, bytes, nrec * bytes);
 		exit(EXIT_FAILURE);
 	}
