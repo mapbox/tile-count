@@ -20,7 +20,7 @@ struct merger {
 	}
 };
 
-void do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom) {
+unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom) {
 	std::priority_queue<merger> q;
 
 	unsigned long long mask = 0;
@@ -80,11 +80,15 @@ void do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, in
 		write64(&f, current_index);
 		write32(&f, current_count);
 	}
+
+	return f;
 }
 
 struct merge_arg {
 	std::vector<merger> mergers;
 	size_t off;
+	size_t outlen;
+	size_t len;
 	unsigned char *out;
 	int zoom;
 };
@@ -106,7 +110,8 @@ void *run_merge(void *va) {
 		nrec += (a->mergers[i].end - a->mergers[i].start) / RECORD_BYTES;
 	}
 
-	do_merge1(a->mergers, a->mergers.size(), a->out + a->off, RECORD_BYTES, nrec, a->zoom);
+	unsigned char *end = do_merge1(a->mergers, a->mergers.size(), a->out + a->off, RECORD_BYTES, nrec, a->zoom);
+	a->outlen = end - (a->out + a->off);
 
 	return NULL;
 }
@@ -185,6 +190,8 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 			printf("range: %zu: %zu\n", j, (args[i].mergers[j].end - args[i].mergers[j].start));
 			off += args[i].mergers[j].end - args[i].mergers[j].start;
 		}
+
+		args[i].len = off - args[i].off;
 	}
 
 	if (off != (size_t)(nrec * bytes + HEADER_LEN)) {
@@ -216,16 +223,30 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 		}
 	}
 
+	size_t outpos = HEADER_LEN;
+	size_t inpos = HEADER_LEN;
+
 	for (size_t i = 0; i < cpus; i++) {
 		void *ret;
 		if (pthread_join(threads[i], &ret) != 0) {
 			perror("pthread_join");
 			exit(EXIT_FAILURE);
 		}
+
+		if (inpos != outpos) {
+			memmove((unsigned char *) map + outpos, (unsigned char *) map + inpos, args[i].outlen);
+		}
+		outpos += args[i].outlen;
+		inpos += args[i].len;
 	}
 
 	if (munmap(map, off) != 0) {
 		perror("munmap");
+		exit(EXIT_FAILURE);
+	}
+
+	if (ftruncate(f, outpos) != 0) {
+		perror("shrink output file");
 		exit(EXIT_FAILURE);
 	}
 }
