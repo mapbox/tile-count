@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <queue>
 #include <iterator>
+#include <algorithm>
 #include <pthread.h>
 #include <sys/mman.h>
 #include "merge.hpp"
@@ -112,6 +113,7 @@ void *run_merge(void *va) {
 
 	unsigned char *end = do_merge1(a->mergers, a->mergers.size(), a->out + a->off, RECORD_BYTES, nrec, a->zoom);
 	a->outlen = end - (a->out + a->off);
+	fprintf(stderr, "done\n");
 
 	return NULL;
 }
@@ -125,28 +127,63 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 	unsigned long long beginning[cpus];
 
+	struct val {
+		unsigned long long index;
+		size_t weight;
+
+		val(long long i, size_t w) {
+			index = i;
+			weight = w;
+		}
+
+		bool operator<(val const &v) const {
+			return index < v.index;
+		};
+	};
+
+	std::vector<val> vals;
+	size_t total_weight = 0;
+	for (size_t j = 0; j < nmerges; j++) {
+		size_t merge_nrec = (merges[j].end - merges[j].start) / bytes;
+		if (merge_nrec != 0) {
+			for (size_t i = 0; i < cpus; i++) {
+				size_t rec = merge_nrec * i / cpus;
+
+				// fprintf(stderr, "%zu: %zu of %zu: %llx\n", j, rec, merge_nrec, read64(merges[j].map + merges[j].start + bytes * rec));
+
+				vals.push_back(val(read64(merges[j].map + merges[j].start + bytes * rec), merge_nrec));
+				total_weight += merge_nrec;
+			}
+		}
+	}
+
+	std::sort(vals.begin(), vals.end());
+
+	size_t weight = 0;
+	size_t n = 0;
+	for (size_t i = 0; i < vals.size(); i++) {
+		weight += vals[i].weight;
+		if (weight >= total_weight * n / cpus) {
+			beginning[n] = vals[i].index;
+			n++;
+
+			if (n >= cpus) {
+				break;
+			}
+		}
+	}
+	for (; n < cpus; n++) {
+		if (n == 0) {
+			beginning[n] = 0;
+		} else {
+			beginning[n] = beginning[n - 1];
+		}
+	}
+
 	std::vector<merge_arg> args;
 
 	for (size_t i = 0; i < cpus; i++) {
-		beginning[i] = 0;
-
-		if (i != 0) {
-			for (size_t j = 0; j < nmerges; j++) {
-				size_t merge_nrec = (merges[j].end - merges[j].start) / bytes;
-				size_t rec = merge_nrec * i / cpus;
-				fprintf(stderr, "%zu: %zu of %zu: %llx\n", j, rec, merge_nrec, read64(merges[j].map + merges[j].start + bytes * rec));
-
-				// Divide here instead of at the end to avoid overflow.
-				// XXX Should the contribution to the average be weighted by the size of the file?
-				beginning[i] += read64(merges[j].map + merges[j].start + bytes * rec) / nmerges;
-			}
-		}
-
-		if (i > 0 && beginning[i] < beginning[i - 1]) {
-			beginning[i] = beginning[i - 1];
-		}
-
-		printf("    %zu: avg %llx\n", i, beginning[i]);
+		fprintf(stderr, "    %zu: avg %llx\n", i, beginning[i]);
 
 		merge_arg ma;
 
@@ -160,9 +197,9 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 
 			finder *l = std::lower_bound(fs, fe, look);
 			if (l == fe) {
-				printf("   at end\n");
+				// printf("   at end\n");
 			} else {
-				printf("   %zu: found %llx\n", j, read64(l->data));
+				// printf("   %zu: found %llx\n", j, read64(l->data));
 			}
 
 			merger m;
@@ -179,7 +216,7 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 
 		args.push_back(ma);
 
-		printf("\n");
+		// printf("\n");
 	}
 
 	size_t off = HEADER_LEN;
@@ -187,7 +224,7 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 		args[i].off = off;
 
 		for (size_t j = 0; j < nmerges; j++) {
-			printf("range: %zu: %zu\n", j, (args[i].mergers[j].end - args[i].mergers[j].start));
+			// printf("range: %zu: %zu\n", j, (args[i].mergers[j].end - args[i].mergers[j].start));
 			off += args[i].mergers[j].end - args[i].mergers[j].start;
 		}
 
