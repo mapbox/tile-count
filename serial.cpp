@@ -12,6 +12,14 @@ void write64(FILE *out, unsigned long long v) {
 	}
 }
 
+void write64(unsigned char *out, unsigned long long v) {
+	// Big-endian so memcmp() sorts numerically
+	for (ssize_t i = 64 - 8; i >= 0; i -= 8) {
+		*out = (v >> i) & 0xFF;
+		out++;
+	}
+}
+
 void write32(FILE *out, unsigned long long v) {
 	// Big-endian so memcmp() sorts numerically
 	for (ssize_t i = 32 - 8; i >= 0; i -= 8) {
