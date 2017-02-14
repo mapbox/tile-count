@@ -5,18 +5,23 @@
 #include <queue>
 #include <iterator>
 #include <pthread.h>
+#include <sys/mman.h>
 #include "merge.hpp"
 #include "header.hpp"
 #include "serial.hpp"
 
-bool merge::operator<(const merge &m) const {
-	// > 0 so that lowest quadkey comes first
-	return memcmp(map + start, m.map + m.start, INDEX_BYTES) > 0;
-}
+struct merger {
+	unsigned char *start;
+	unsigned char *end;
 
+        bool operator<(const merger &m) const {
+		// > 0 so that lowest quadkey comes first
+		return memcmp(start, m.start, INDEX_BYTES) > 0;
+	}
+};
 
-void do_merge1(struct merge *merges, size_t nmerges, FILE *f, int bytes, long long nrec, int zoom) {
-	std::priority_queue<merge> q;
+void do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom) {
+	std::priority_queue<merger> q;
 
 	unsigned long long mask = 0;
 	if (zoom != 0) {
@@ -36,21 +41,21 @@ void do_merge1(struct merge *merges, size_t nmerges, FILE *f, int bytes, long lo
 	unsigned long long current_count = 0;
 
 	while (q.size() != 0) {
-		merge head = q.top();
+		merger head = q.top();
 		q.pop();
 
-		unsigned long long new_index = read64(head.map + head.start) & mask;
-		unsigned long long count = read32(head.map + head.start + INDEX_BYTES);
+		unsigned long long new_index = read64(head.start) & mask;
+		unsigned long long count = read32(head.start + INDEX_BYTES);
 
 		if (new_index < current_index) {
-			fprintf(stderr, "Internal error: file out of order: %llx vs %llx\n", read64(head.map + head.start), current_index);
+			fprintf(stderr, "Internal error: file out of order: %llx vs %llx\n", read64(head.start), current_index);
 			exit(EXIT_FAILURE);
 		}
 
 		if (new_index != current_index || current_count + count > MAX_COUNT) {
 			if (current_count != 0) {
-				write64(f, current_index);
-				write32(f, current_count);
+				write64(&f, current_index);
+				write32(&f, current_count);
 			}
 
 			current_index = new_index;
@@ -72,20 +77,16 @@ void do_merge1(struct merge *merges, size_t nmerges, FILE *f, int bytes, long lo
 	}
 
 	if (current_count != 0) {
-		write64(f, current_index);
-		write32(f, current_count);
+		write64(&f, current_index);
+		write32(&f, current_count);
 	}
 }
-
-struct merger {
-	unsigned char *start;
-	unsigned char *end;
-};
 
 struct merge_arg {
 	std::vector<merger> mergers;
 	size_t off;
 	unsigned char *out;
+	int zoom;
 };
 
 struct finder {
@@ -96,7 +97,21 @@ struct finder {
 	}
 };
 
-void do_merge(struct merge *merges, size_t nmerges, FILE *f, int bytes, long long nrec, int zoom) {
+void *run_merge(void *va) {
+	merge_arg *a = (merge_arg *) va;
+
+	// XXX fix progress
+	size_t nrec = 0;
+	for (size_t i = 0; i < a->mergers.size(); i++) {
+		nrec += (a->mergers[i].end - a->mergers[i].start) / RECORD_BYTES;
+	}
+
+	do_merge1(a->mergers, a->mergers.size(), a->out, nrec, 12345, a->zoom);
+
+	return NULL;
+}
+
+void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long nrec, int zoom) {
 	unsigned long long mask = 0;
 	if (zoom != 0) {
 		mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);
@@ -135,7 +150,8 @@ void do_merge(struct merge *merges, size_t nmerges, FILE *f, int bytes, long lon
 			finder *fe = (finder *) (merges[j].map + merges[j].end);
 
 			finder look;
-			write64(look.data, beginning[i] & mask);
+			unsigned char *p = look.data;
+			write64(&p, beginning[i] & mask);
 
 			finder *l = std::lower_bound(fs, fe, look);
 			if (l == fe) {
@@ -161,5 +177,55 @@ void do_merge(struct merge *merges, size_t nmerges, FILE *f, int bytes, long lon
 		printf("\n");
 	}
 
-	do_merge1(merges, nmerges, f, bytes, nrec, zoom);
+	size_t off = HEADER_LEN;
+	for (size_t i = 0; i < cpus; i++) {
+		for (size_t j = 0; j < nmerges; j++) {
+			printf("range: %zu: %zu\n", j, (args[i].mergers[j].end - args[i].mergers[j].start));
+			off += args[i].mergers[j].end - args[i].mergers[j].start;
+		}
+
+		args[i].off = off;
+	}
+
+	if (off != (size_t) (nrec * bytes + HEADER_LEN)) {
+		fprintf(stderr, "Internal error: Wrong total size: %zu vs %lld * %d == %lld\n", off, nrec, bytes, nrec * bytes);
+		exit(EXIT_FAILURE);
+	}
+
+	if (ftruncate(f, off) != 0) {
+		perror("resize output file");
+		exit(EXIT_FAILURE);
+	}
+
+	void *map = mmap(NULL, off, PROT_READ | PROT_WRITE, MAP_SHARED, f, 0);
+	if (map == MAP_FAILED) {
+		perror("mmap output file");
+		exit(EXIT_FAILURE);
+	}
+
+	memcpy(map, header_text, HEADER_LEN);
+
+	pthread_t threads[cpus];
+	for (size_t i = 0; i < cpus; i++) {
+		args[i].out = (unsigned char *) map;
+		args[i].zoom = zoom;
+
+		if (pthread_create(&threads[i], NULL, run_merge, &args[i]) != 0) {
+			perror("pthread_create");
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	for (size_t i = 0; i < cpus; i++) {
+		void *ret;
+		if (pthread_join(threads[i], &ret) != 0) {
+			perror("pthread_join");
+			exit(EXIT_FAILURE);
+		}
+	}
+
+	if (munmap(map, off) != 0) {
+		perror("munmap");
+		exit(EXIT_FAILURE);
+	}
 }
