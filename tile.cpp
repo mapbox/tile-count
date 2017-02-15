@@ -194,31 +194,11 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long 
 
 		unsigned char *rows[1U << detail];
 		for (size_t y = 0; y < 1U << detail; y++) {
-			rows[y] = new unsigned char[4 * 1U << detail];
+			rows[y] = new unsigned char[1U << detail];
 
 			for (size_t x = 0; x < (1U << detail); x++) {
 				long long count = tile.count[y * (1 << detail) + x];
-				long long r, g, b, a;
-				int fg = white ? 0x00 : 0xFF;
-
-				if (count <= levels / 2) {
-					r = (color >> 16) & 0xFF;
-					g = (color >> 8) & 0xFF;
-					b = (color >> 0) & 0xFF;
-					a = 255 * count / (levels / 2);
-				} else {
-					double along = 255 * (count - levels / 2) / (levels - levels / 2 - 1) / 255.0;
-
-					r = ((color >> 16) & 0xFF) * (1 - along) + fg * (along);
-					g = ((color >> 8) & 0xFF) * (1 - along) + fg * (along);
-					b = ((color >> 0) & 0xFF) * (1 - along) + fg * (along);
-					a = 255;
-				}
-
-				rows[y][x * 4 + 0] = r;
-				rows[y][x * 4 + 1] = g;
-				rows[y][x * 4 + 2] = b;
-				rows[y][x * 4 + 3] = a;
+				rows[y][x] = count;
 			}
 		}
 
@@ -233,7 +213,28 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long 
 			fprintf(stderr, "PNG failure (info struct)\n");
 			exit(EXIT_FAILURE);
 		} else {
-			png_set_IHDR(png_ptr, info_ptr, 1U << detail, 1U << detail, 8, PNG_COLOR_TYPE_RGB_ALPHA, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+			png_set_IHDR(png_ptr, info_ptr, 1U << detail, 1U << detail, 8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+
+			png_byte transparency[levels];
+			png_color colors[levels];
+			for (int i = 0; i < levels / 2; i++) {
+				colors[i].red = (color >> 16) & 0xFF;
+				colors[i].green = (color >> 8) & 0xFF;
+				colors[i].blue = (color >> 0) & 0xFF;
+				transparency[i] = 255 * i / (levels / 2);
+			}
+			for (int i = levels / 2; i < levels; i++) {
+				double along = 255 * (i - levels / 2) / (levels - levels / 2 - 1) / 255.0;
+				int fg = white ? 0x00 : 0xFF;
+
+				colors[i].red = ((color >> 16) & 0xFF) * (1 - along) + fg * (along);
+				colors[i].green = ((color >> 8) & 0xFF) * (1 - along) + fg * (along);
+				colors[i].blue = ((color >> 0) & 0xFF) * (1 - along) + fg * (along);
+				transparency[i] = 255;
+			}
+			png_set_tRNS(png_ptr, info_ptr, transparency, levels, NULL);
+			png_set_PLTE(png_ptr, info_ptr, colors, levels);
+
 			png_set_rows(png_ptr, info_ptr, rows);
 			png_set_write_fn(png_ptr, &compressed, string_append, NULL);
 			png_write_png(png_ptr, info_ptr, 0, NULL);
