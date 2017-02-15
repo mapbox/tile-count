@@ -19,7 +19,6 @@
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
-#include "kll.hpp"
 #include "tippecanoe/mvt.hpp"
 #include "tippecanoe/mbtiles.hpp"
 
@@ -54,7 +53,6 @@ struct tile {
 struct tiler {
 	std::vector<tile> tiles;
 	std::vector<tile> partial_tiles;
-	std::vector<kll<long long>> quantiles;
 	std::vector<long long> max;       // for this thread
 	std::vector<long long> zoom_max;  // global on 2nd pass
 	size_t pass;
@@ -133,11 +131,10 @@ std::vector<mvt_geometry> merge_rings(std::vector<mvt_geometry> g) {
 	return out;
 }
 
-void gather_quantile(kll<long long> &kll, tile const &tile, int detail, long long &max) {
+void gather_quantile(tile const &tile, int detail, long long &max) {
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
-			kll.update(count);
 
 			if (count > max) {
 				max = count;
@@ -416,7 +413,7 @@ void *run_tile(void *p) {
 
 					if (first_for_tile >= first && last_for_tile <= last) {
 						if (t->pass == 0) {
-							gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
+							gather_quantile(t->tiles[z], t->detail, t->max[z]);
 						} else {
 							make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z]);
 						}
@@ -451,7 +448,7 @@ void *run_tile(void *p) {
 
 			if (first_for_tile >= first && last_for_tile <= last) {
 				if (t->pass == 0) {
-					gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
+					gather_quantile(t->tiles[z], t->detail, t->max[z]);
 				} else {
 					make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z]);
 				}
@@ -554,6 +551,12 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	if (zoom < 0) {
+		fprintf(stderr, "%s: Must specify bin size zoom level with -z\n", argv[0]);
+		usage(argv);
+		exit(EXIT_FAILURE);
+	}
+
 	if (zoom < (signed) (detail + 1)) {
 		fprintf(stderr, "%s: Detail (%zu) too low for zoom (%d)\n", argv[0], detail, zoom);
 		exit(EXIT_FAILURE);
@@ -604,7 +607,6 @@ int main(int argc, char **argv) {
 		for (size_t j = 0; j < cpus; j++) {
 			for (size_t z = 0; z < zooms; z++) {
 				tilers[j].tiles.push_back(tile(detail, z));
-				tilers[j].quantiles.push_back(kll<long long>());
 				tilers[j].max.push_back(0);
 			}
 			tilers[j].bbox[0] = tilers[j].bbox[1] = UINT_MAX;
@@ -675,7 +677,7 @@ int main(int argc, char **argv) {
 
 		for (auto a = partials.begin(); a != partials.end(); a++) {
 			if (pass == 0) {
-				gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail, tilers[0].max[a->second.z]);
+				gather_quantile(a->second, detail, tilers[0].max[a->second.z]);
 			} else {
 				make_tile(outdb, a->second, a->second.z, detail, zooms - 1, zoom_max[a->second.z]);
 			}
@@ -684,23 +686,18 @@ int main(int argc, char **argv) {
 		clock_t clock_b = clock();
 
 		if (pass == 0) {
-			std::vector<kll<long long>> quantiles;
 			std::vector<long long> max;
-			quantiles.resize(zooms);
 
 			for (size_t z = 0; z < zooms; z++) {
 				max.push_back(0);
 
 				for (size_t c = 0; c < tilers.size(); c++) {
-					quantiles[z].merge(tilers[c].quantiles[z]);
 					if (tilers[c].max[z] > max[z]) {
 						max[z] = tilers[c].max[z];
 					}
 				}
 
-				std::vector<std::pair<double, long long>> cdf = quantiles[z].cdf();
-				// Maybe should be ~99.9th percentile instead of 100th /2?
-				zoom_max.push_back(cdf[cdf.size() - 1].second / 2);
+				zoom_max.push_back(max[z] / 2);
 			}
 
 			regress(max);
