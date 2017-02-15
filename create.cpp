@@ -130,7 +130,7 @@ void *run_sort(void *p) {
 	return NULL;
 }
 
-void sort_and_merge(int fd, FILE *out, int zoom) {
+void sort_and_merge(int fd, int out, int zoom) {
 	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 
 	struct stat st;
@@ -184,7 +184,7 @@ void sort_and_merge(int fd, FILE *out, int zoom) {
 		}
 	}
 
-	if (fwrite(header_text, HEADER_LEN, 1, out) != 1) {
+	if (write(out, header_text, HEADER_LEN) != HEADER_LEN) {
 		perror("write header");
 		exit(EXIT_FAILURE);
 	}
@@ -279,14 +279,15 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	fp = fopen(outfile, "wb");
-	if (fp == NULL) {
+	int f = open(outfile, O_CREAT | O_TRUNC | O_RDWR, 0777);
+	if (f < 0) {
 		perror(outfile);
 		exit(EXIT_FAILURE);
 	}
-
-	sort_and_merge(fd, fp, zoom);
-	fclose(fp);
+	sort_and_merge(fd, f, zoom);
+	if (close(f) != 0) {
+		perror("close");
+	}
 
 	return 0;
 }

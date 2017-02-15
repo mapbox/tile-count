@@ -80,19 +80,22 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	FILE *out = fopen(outfile, "wb");
-	if (out == NULL) {
+	int out = open(outfile, O_CREAT | O_TRUNC | O_RDWR, 0777);
+	if (out < 0) {
 		perror(outfile);
 		exit(EXIT_FAILURE);
 	}
 
-	if (fwrite(header_text, HEADER_LEN, 1, out) != 1) {
+	if (write(out, header_text, HEADER_LEN) != HEADER_LEN) {
 		perror("write header");
 		exit(EXIT_FAILURE);
 	}
 
 	do_merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom);
-	fclose(out);
+	if (close(out) != 0) {
+		perror("close");
+		exit(EXIT_FAILURE);
+	}
 
 	return 0;
 }
