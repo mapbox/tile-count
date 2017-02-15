@@ -493,6 +493,24 @@ void regress(std::vector<long long> &max) {
 	}
 }
 
+struct todo {
+	std::vector<tile> tiles;
+	std::vector<long long> zoom_max;
+	sqlite3 *outdb;
+	int detail;
+	int maxzoom;
+};
+
+void *run_partial(void *v) {
+	todo *t = (todo *) v;
+
+	for (size_t i = 0; i < t->tiles.size(); i++) {
+		make_tile(t->outdb, t->tiles[i], t->tiles[i].z, t->detail, t->maxzoom, t->zoom_max[t->tiles[i].z]);
+	}
+
+	return NULL;
+}
+
 int main(int argc, char **argv) {
 	extern int optind;
 	extern char *optarg;
@@ -642,6 +660,9 @@ int main(int argc, char **argv) {
 			}
 		}
 
+		// Collect and consolidate partially counted tiles
+		std::map<std::vector<unsigned>, tile> partials;
+
 		for (size_t j = 0; j < cpus; j++) {
 			void *retval;
 
@@ -649,12 +670,7 @@ int main(int argc, char **argv) {
 				perror("pthread_join");
 				exit(EXIT_FAILURE);
 			}
-		}
 
-		// Collect and consolidate partially counted tiles
-
-		std::map<std::vector<unsigned>, tile> partials;
-		for (size_t j = 0; j < cpus; j++) {
 			for (size_t k = 0; k < tilers[j].partial_tiles.size(); k++) {
 				std::vector<unsigned> key;
 				key.push_back(tilers[j].partial_tiles[k].z);
@@ -671,15 +687,48 @@ int main(int argc, char **argv) {
 					}
 				}
 			}
+
+			tilers[j].partial_tiles.clear();
 		}
 
 		clock_t clock_a = clock();
 
-		for (auto a = partials.begin(); a != partials.end(); a++) {
-			if (pass == 0) {
+		if (pass == 0) {
+			for (auto a = partials.begin(); a != partials.end(); a++) {
 				gather_quantile(a->second, detail, tilers[0].max[a->second.z]);
-			} else {
-				make_tile(outdb, a->second, a->second.z, detail, zooms - 1, zoom_max[a->second.z]);
+			}
+		} else {
+			std::vector<todo> todos;
+			for (size_t c = 0; c < cpus; c++) {
+				todo td;
+				td.outdb = outdb;
+				td.detail = detail;
+				td.maxzoom = zooms - 1;
+				td.zoom_max = zoom_max;
+
+				todos.push_back(td);
+			}
+
+			size_t c = 0;
+			for (auto a = partials.begin(); a != partials.end(); a++) {
+				todos[c % cpus].tiles.push_back(a->second);
+				c++;
+			}
+
+			pthread_t threads[cpus];
+			for (size_t cpu = 0; cpu < cpus; cpu++) {
+				if (pthread_create(&threads[cpu], NULL, run_partial, &todos[cpu]) != 0) {
+					perror("pthread_create");
+					exit(EXIT_FAILURE);
+				}
+			}
+			for (size_t cpu = 0; cpu < cpus; cpu++) {
+				void *ret;
+
+				if (pthread_join(threads[cpu], &ret) != 0) {
+					perror("pthread_join");
+					exit(EXIT_FAILURE);
+				}
 			}
 		}
 
