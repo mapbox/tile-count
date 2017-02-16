@@ -183,6 +183,7 @@ void sort_and_merge(int fd, int out, int zoom) {
 			}
 		}
 	}
+	fprintf(stderr, "\n");
 
 	if (write(out, header_text, HEADER_LEN) != HEADER_LEN) {
 		perror("write header");
@@ -190,7 +191,7 @@ void sort_and_merge(int fd, int out, int zoom) {
 	}
 
 	if (to_sort > 0) {
-		void *map = mmap(NULL, to_sort, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+		void *map = mmap(NULL, to_sort, PROT_READ, MAP_SHARED, fd, 0);
 		if (map == MAP_FAILED) {
 			perror("mmap (for merge)");
 			exit(EXIT_FAILURE);
@@ -269,6 +270,7 @@ int main(int argc, char **argv) {
 			}
 		}
 	}
+	fprintf(stderr, "Total of %lld\n", seq);
 
 	if (fflush(fp) != 0) {
 		perror("flush output file");
