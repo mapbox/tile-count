@@ -19,7 +19,12 @@ else
 	FINAL_FLAGS := -g $(WARNING_FLAGS) $(DEBUG_FLAGS)
 endif
 
-all: tile-count-create tile-count-decode tile-count-tile tile-count-merge
+PGMS := tile-count-create tile-count-decode tile-count-tile tile-count-merge
+
+all: $(PGMS)
+
+install: $(PGMS)
+	cp $(PGMS) $(PREFIX)/bin
 
 PG=
 
