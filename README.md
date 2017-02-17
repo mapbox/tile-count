@@ -69,7 +69,8 @@ normalized according the densest point in the zoom level.
 * `-m` *level*: Don't include normalized counts that are quantized below the specified level. The default is 6.
 * `-g` *gamma*: Scale the counts within each tile to the gamma'th root of their linear value. The default is 2.5.
 
-* `-b`: Create PNG raster tiles instead of vectors. You will probably also want to specify `-d8` for normal web map tile resolution.
+* `-b`: Create PNG raster tiles instead of vectors. If you are not planning to use these tiles with Mapbox GL,
+        You will probably also want to specify `-d8` for normal 256x256 web map tile resolution.
 * `-c` *rrggbb*: Specify the color to use in raster tiles as a hex color.
 * `-w`: Make tiles for a white background instead of a black background.
 

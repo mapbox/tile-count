@@ -137,7 +137,7 @@ void gather_quantile(kll<long long> &kll, tile const &tile, int detail, long lon
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
-			kll.update(count);
+			// kll.update(count);
 
 			if (count > max) {
 				max = count;
@@ -429,8 +429,10 @@ void *run_tile(void *p) {
 				t->tiles[z].active = true;
 				t->tiles[z].x = tx;
 				t->tiles[z].y = ty;
-				t->tiles[z].count.resize(0);
-				t->tiles[z].count.resize((1 << t->detail) * (1 << t->detail), 0);
+
+				for (size_t x = 0; x < (1 << t->detail) * (1 << t->detail); x++) {
+					t->tiles[z].count[x] = 0;
+				}
 			}
 
 			t->tiles[z].count[py * (1 << t->detail) + px] += count;
@@ -555,16 +557,16 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	if (optind + 1 != argc || zoom < 0 || outfile == NULL) {
+		usage(argv);
+		exit(EXIT_FAILURE);
+	}
+
 	if (zoom < (signed) (detail + 1)) {
 		fprintf(stderr, "%s: Detail (%zu) too low for zoom (%d)\n", argv[0], detail, zoom);
 		exit(EXIT_FAILURE);
 	}
 	size_t zooms = zoom - detail + 1;
-
-	if (optind + 1 != argc || zoom < 0 || outfile == NULL) {
-		usage(argv);
-		exit(EXIT_FAILURE);
-	}
 
 	if (force) {
 		unlink(outfile);
@@ -574,6 +576,11 @@ int main(int argc, char **argv) {
 	struct stat st;
 	if (stat(argv[optind], &st) != 0) {
 		perror(optind[argv]);
+		exit(EXIT_FAILURE);
+	}
+
+	if (st.st_size <= HEADER_LEN) {
+		fprintf(stderr, "%s: %s: File contains no data\n", argv[0], argv[optind]);
 		exit(EXIT_FAILURE);
 	}
 
@@ -693,18 +700,20 @@ int main(int argc, char **argv) {
 				max.push_back(0);
 
 				for (size_t c = 0; c < tilers.size(); c++) {
-					quantiles[z].merge(tilers[c].quantiles[z]);
-					if (tilers[c].max[z] > max[z]) {
-						max[z] = tilers[c].max[z];
+					// quantiles[z].merge(tilers[c].quantiles[z]);
+					if (tilers[c].max[z] / 2 > max[z]) {
+						max[z] = tilers[c].max[z] / 2;
 					}
 				}
 
-				std::vector<std::pair<double, long long>> cdf = quantiles[z].cdf();
+				// std::vector<std::pair<double, long long>> cdf = quantiles[z].cdf();
 				// Maybe should be ~99.9th percentile instead of 100th /2?
-				zoom_max.push_back(cdf[cdf.size() - 1].second / 2);
+				// zoom_max.push_back(cdf[cdf.size() - 1].second / 2);
+				zoom_max.push_back(max[z]);
 			}
 
 			regress(max);
+			regress(zoom_max);
 		} else {
 			long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
 			for (size_t j = 0; j < cpus; j++) {
