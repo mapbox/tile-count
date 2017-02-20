@@ -468,6 +468,12 @@ void *run_tile(void *p) {
 }
 
 void regress(std::vector<long long> &max) {
+	for (size_t i = 0; i < max.size(); i++) {
+		if (max[i] == 0) {
+			max[i] = 1;
+		}
+	}
+
 	double sum_x = 0;
 	double sum_y = 0;
 	double sum_x2 = 0;
@@ -607,11 +613,6 @@ int main(int argc, char **argv) {
 	struct stat st;
 	if (stat(argv[optind], &st) != 0) {
 		perror(optind[argv]);
-		exit(EXIT_FAILURE);
-	}
-
-	if (st.st_size <= HEADER_LEN) {
-		fprintf(stderr, "%s: %s: File contains no data\n", argv[0], argv[optind]);
 		exit(EXIT_FAILURE);
 	}
 
