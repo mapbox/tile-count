@@ -178,7 +178,7 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long 
 			}
 
 			tile.count[y * (1 << detail) + x] = count;
-			if (count != 0 && count >= first_level) {
+			if (count != 0 && (bitmap || count >= first_level)) {
 				anything = true;
 			}
 		}
@@ -499,6 +499,37 @@ void regress(std::vector<long long> &max) {
 	}
 }
 
+void write_meta(std::vector<long long> const &zoom_max, sqlite3 *outdb) {
+	char *sql, *err;
+
+	std::string maxes;
+	for (size_t i = 0; i < zoom_max.size(); i++) {
+		maxes.append(std::to_string(zoom_max[i]));
+		maxes.append(",");
+	}
+
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('max_density', %Q);", maxes.c_str());
+	if (sqlite3_exec(outdb, sql, NULL, NULL, &err) != SQLITE_OK) {
+		fprintf(stderr, "set name in metadata: %s\n", err);
+		exit(EXIT_FAILURE);
+	}
+	sqlite3_free(sql);
+
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('density_levels', %d);", levels);
+	if (sqlite3_exec(outdb, sql, NULL, NULL, &err) != SQLITE_OK) {
+		fprintf(stderr, "set name in metadata: %s\n", err);
+		exit(EXIT_FAILURE);
+	}
+	sqlite3_free(sql);
+
+	sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('density_gamma', %f);", count_gamma);
+	if (sqlite3_exec(outdb, sql, NULL, NULL, &err) != SQLITE_OK) {
+		fprintf(stderr, "set name in metadata: %s\n", err);
+		exit(EXIT_FAILURE);
+	}
+	sqlite3_free(sql);
+}
+
 int main(int argc, char **argv) {
 	extern int optind;
 	extern char *optarg;
@@ -765,5 +796,8 @@ int main(int argc, char **argv) {
 	}
 
 	mbtiles_write_metadata(outdb, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, !bitmap);
+
+	write_meta(zoom_max, outdb);
+
 	mbtiles_close(outdb, argv);
 }
