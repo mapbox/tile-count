@@ -430,7 +430,7 @@ void *run_tile(void *p) {
 				t->tiles[z].x = tx;
 				t->tiles[z].y = ty;
 
-				for (size_t x = 0; x < (1 << t->detail) * (1 << t->detail); x++) {
+				for (size_t x = 0; x < (1U << t->detail) * (1U << t->detail); x++) {
 					t->tiles[z].count[x] = 0;
 				}
 			}
