@@ -62,6 +62,7 @@ struct tiler {
 	size_t end;
 	long long bbox[4];
 	long long midx, midy;
+	long long atmid;
 
 	unsigned char *map;
 	size_t zooms;
@@ -437,10 +438,11 @@ void *run_tile(void *p) {
 
 			t->tiles[z].count[py * (1 << t->detail) + px] += count;
 
-			if (t->tiles[z].count[py * (1 << t->detail) + px] > max) {
+			if (z == t->zooms - 1 && t->tiles[z].count[py * (1 << t->detail) + px] > max) {
 				max = t->tiles[z].count[py * (1 << t->detail) + px];
 				t->midx = wx;
 				t->midy = wy;
+				t->atmid = max;
 			}
 		}
 	}
@@ -562,6 +564,10 @@ int main(int argc, char **argv) {
 
 		case 'l':
 			levels = atoi(optarg);
+			if (levels < 1 || levels > 256) {
+				fprintf(stderr, "%s: Levels (-l%s) cannot exceed 256\n", argv[0], optarg);
+				exit(EXIT_FAILURE);
+			}
 			break;
 
 		case 'm':
@@ -763,7 +769,15 @@ int main(int argc, char **argv) {
 				}
 			}
 
-			tile2lonlat(tilers[0].midx, tilers[0].midy, 32, &midlon, &midlat);  // XXX unstable
+			long long max = 0;
+			for (size_t j = 0; j < cpus; j++) {
+				printf("%lld\n", tilers[j].atmid);
+				if (tilers[j].atmid > max) {
+					max = tilers[j].atmid;
+					tile2lonlat(tilers[j].midx, tilers[j].midy, 32, &midlon, &midlat);
+				}
+			}
+
 			tile2lonlat(file_bbox[0], file_bbox[1], 32, &minlon, &maxlat);
 			tile2lonlat(file_bbox[2], file_bbox[3], 32, &maxlon, &minlat);
 		}
