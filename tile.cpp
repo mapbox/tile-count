@@ -8,6 +8,7 @@
 #include <vector>
 #include <set>
 #include <map>
+#include <queue>
 #include <algorithm>
 #include <fcntl.h>
 #include <pthread.h>
@@ -538,6 +539,117 @@ void write_meta(std::vector<long long> const &zoom_max, sqlite3 *outdb) {
 	sqlite3_free(sql);
 }
 
+struct tile_reader {
+	sqlite3 *db = NULL;
+	sqlite3_stmt *stmt = NULL;
+	std::string name;
+
+	int zoom = 0;
+	int x = 0;
+	int sorty = 0;
+	std::string data;
+
+	int y() {
+		return (1LL << zoom) - 1 - sorty;
+	}
+
+	// Comparisons are backwards because priority_queue puts highest first
+	bool operator<(const tile_reader r) const {
+		if (zoom > r.zoom) {
+			return true;
+		}
+		if (zoom < r.zoom) {
+			return false;
+		}
+
+		if (x > r.x) {
+			return true;
+		}
+		if (x < r.x) {
+			return false;
+		}
+
+		if (sorty > r.sorty) {
+			return true;
+		}
+		if (sorty < r.sorty) {
+			return false;
+		}
+
+		if (data > r.data) {
+			return true;
+		}
+
+		return false;
+	}
+};
+
+void merge_tiles(char **fnames, size_t n) {
+	std::priority_queue<tile_reader> readers;
+
+	for (size_t i = 0; i < n; i++) {
+		tile_reader r;
+		r.name = fnames[i];
+
+		if (sqlite3_open(fnames[i], &r.db) != SQLITE_OK) {
+			fprintf(stderr, "%s: %s\n", fnames[i], sqlite3_errmsg(r.db));
+			exit(EXIT_FAILURE);
+		}
+
+		const char *sql = "SELECT zoom_level, tile_column, tile_row, tile_data from tiles order by zoom_level, tile_column, tile_row;";
+		if (sqlite3_prepare_v2(r.db, sql, -1, &r.stmt, NULL) != SQLITE_OK) {
+			fprintf(stderr, "%s: select failed: %s\n", fnames[i], sqlite3_errmsg(r.db));
+			exit(EXIT_FAILURE);
+		}
+
+		if (sqlite3_step(r.stmt) == SQLITE_ROW) {
+			r.zoom = sqlite3_column_int(r.stmt, 0);
+			r.x = sqlite3_column_int(r.stmt, 1);
+			r.sorty = sqlite3_column_int(r.stmt, 2);
+
+			const char *data = (const char *) sqlite3_column_blob(r.stmt, 3);
+			size_t len = sqlite3_column_bytes(r.stmt, 3);
+			r.data = std::string(data, len);
+			readers.push(r);
+		} else {
+			sqlite3_finalize(r.stmt);
+
+			if (sqlite3_close(r.db) != SQLITE_OK) {
+				fprintf(stderr, "%s: could not close database: %s\n", r.name.c_str(), sqlite3_errmsg(r.db));
+				exit(EXIT_FAILURE);
+			}
+		}
+	}
+
+	while (readers.size() != 0) {
+		tile_reader r = readers.top();
+		readers.pop();
+
+		printf("got %d/%d/%d %s\n", r.zoom, r.x, r.y(), r.name.c_str());
+
+		// ...
+
+		if (sqlite3_step(r.stmt) == SQLITE_ROW) {
+			r.zoom = sqlite3_column_int(r.stmt, 0);
+			r.x = sqlite3_column_int(r.stmt, 1);
+			r.sorty = sqlite3_column_int(r.stmt, 2);
+
+			const char *data = (const char *) sqlite3_column_blob(r.stmt, 3);
+			size_t len = sqlite3_column_bytes(r.stmt, 3);
+			r.data = std::string(data, len);
+
+			readers.push(r);
+		} else {
+			sqlite3_finalize(r.stmt);
+
+			if (sqlite3_close(r.db) != SQLITE_OK) {
+				fprintf(stderr, "%s: could not close database: %s\n", r.name.c_str(), sqlite3_errmsg(r.db));
+				exit(EXIT_FAILURE);
+			}
+		}
+	}
+}
+
 int main(int argc, char **argv) {
 	extern int optind;
 	extern char *optarg;
@@ -809,8 +921,8 @@ int main(int argc, char **argv) {
 			}
 		}
 	} else {
-		// XXX merge tiles
 		fprintf(stderr, "going to merge %zu zoom levels\n", zooms);
+		merge_tiles(argv + optind, argc - optind);
 	}
 
 	layermap_entry lme(0);
