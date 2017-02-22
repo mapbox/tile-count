@@ -584,7 +584,30 @@ struct tile_reader {
 	}
 };
 
-void merge_tiles(char **fnames, size_t n) {
+void merge(std::vector<tile_reader> &r, size_t cpus) {
+	std::vector<std::vector<tile_reader *>> queues;
+	queues.resize(cpus);
+
+	size_t o = 0;
+	for (size_t i = 0; i < r.size(); i++) {
+		queues[o].push_back(&r[i]);
+
+		if (i == 0 || r[i].x != r[i - 1].x || r[i].y() != r[i - 1].y() || r[i].zoom != r[i - 1].zoom) {
+			o = (o + 1) % cpus;
+		}
+	}
+
+	for (size_t i = 0; i < cpus; i++) {
+		for (size_t j = 0; j < queues[i].size(); j++) {
+			printf("%d/%d/%d ", queues[i][j]->zoom, queues[i][j]->x, queues[i][j]->y());
+		}
+		printf("\n");
+	}
+
+	printf("\n");
+}
+
+void merge_tiles(char **fnames, size_t n, size_t cpus) {
 	std::priority_queue<tile_reader> readers;
 
 	for (size_t i = 0; i < n; i++) {
@@ -621,13 +644,21 @@ void merge_tiles(char **fnames, size_t n) {
 		}
 	}
 
+	std::vector<tile_reader> to_merge;
+
 	while (readers.size() != 0) {
 		tile_reader r = readers.top();
 		readers.pop();
 
-		printf("got %d/%d/%d %s\n", r.zoom, r.x, r.y(), r.name.c_str());
+		if (to_merge.size() > 50 * cpus) {
+			tile_reader &last = to_merge[to_merge.size() - 1];
+			if (r.x != last.x || r.y() != last.y() || r.zoom != last.zoom) {
+				merge(to_merge, cpus);
+				to_merge.clear();
+			}
+		}
 
-		// ...
+		to_merge.push_back(r);
 
 		if (sqlite3_step(r.stmt) == SQLITE_ROW) {
 			r.zoom = sqlite3_column_int(r.stmt, 0);
@@ -648,6 +679,8 @@ void merge_tiles(char **fnames, size_t n) {
 			}
 		}
 	}
+
+	merge(to_merge, cpus);
 }
 
 int main(int argc, char **argv) {
@@ -922,7 +955,7 @@ int main(int argc, char **argv) {
 		}
 	} else {
 		fprintf(stderr, "going to merge %zu zoom levels\n", zooms);
-		merge_tiles(argv + optind, argc - optind);
+		merge_tiles(argv + optind, argc - optind, cpus);
 	}
 
 	layermap_entry lme(0);
