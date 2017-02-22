@@ -549,6 +549,10 @@ struct tile_reader {
 	int sorty = 0;
 	std::string data;
 
+	int density_levels;
+	double density_gamma;
+	std::vector<long long> max_density;
+
 	int y() {
 		return (1LL << zoom) - 1 - sorty;
 	}
@@ -607,6 +611,23 @@ void merge(std::vector<tile_reader> &r, size_t cpus) {
 	printf("\n");
 }
 
+std::vector<long long> parse_max_density(const unsigned char *v) {
+	std::vector<long long> out;
+
+	while (*v != '\0') {
+		out.push_back(atoll((const char *) v));
+
+		while (*v != '\0' && *v != ',') {
+			v++;
+		}
+		if (*v == ',') {
+			v++;
+		}
+	}
+
+	return out;
+}
+
 void merge_tiles(char **fnames, size_t n, size_t cpus) {
 	std::priority_queue<tile_reader> readers;
 
@@ -617,6 +638,37 @@ void merge_tiles(char **fnames, size_t n, size_t cpus) {
 		if (sqlite3_open(fnames[i], &r.db) != SQLITE_OK) {
 			fprintf(stderr, "%s: %s\n", fnames[i], sqlite3_errmsg(r.db));
 			exit(EXIT_FAILURE);
+		}
+
+		sqlite3_stmt *stmt;
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'max_density'", -1, &stmt, NULL) == SQLITE_OK) {
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				r.max_density = parse_max_density(sqlite3_column_text(stmt, 0));
+			} else {
+				fprintf(stderr, "%s: No max_density value in metadata\n", fnames[i]);
+				exit(EXIT_FAILURE);
+			}
+			sqlite3_finalize(stmt);
+		}
+
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'density_levels'", -1, &stmt, NULL) == SQLITE_OK) {
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				r.density_levels = sqlite3_column_int(stmt, 0);
+			} else {
+				fprintf(stderr, "%s: No density_levels value in metadata\n", fnames[i]);
+				exit(EXIT_FAILURE);
+			}
+			sqlite3_finalize(stmt);
+		}
+
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'density_gamma'", -1, &stmt, NULL) == SQLITE_OK) {
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				r.density_gamma = sqlite3_column_double(stmt, 0);
+			} else {
+				fprintf(stderr, "%s: No density_gamma value in metadata\n", fnames[i]);
+				exit(EXIT_FAILURE);
+			}
+			sqlite3_finalize(stmt);
 		}
 
 		const char *sql = "SELECT zoom_level, tile_column, tile_row, tile_data from tiles order by zoom_level, tile_column, tile_row;";
