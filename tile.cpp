@@ -592,7 +592,7 @@ void merge(std::vector<tile_reader> &r, size_t cpus) {
 	for (size_t i = 0; i < r.size(); i++) {
 		queues[o].push_back(&r[i]);
 
-		if (i == 0 || r[i].x != r[i - 1].x || r[i].y() != r[i - 1].y() || r[i].zoom != r[i - 1].zoom) {
+		if (i + 1 < r.size() && (r[i].x != r[i + 1].x || r[i].y() != r[i + 1].y() || r[i].zoom != r[i + 1].zoom)) {
 			o = (o + 1) % cpus;
 		}
 	}
