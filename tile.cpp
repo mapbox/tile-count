@@ -73,6 +73,9 @@ struct tiler {
 	volatile int *progress;
 	size_t shard;
 	size_t cpus;
+
+	double mean;
+	double stddev;
 };
 
 std::vector<mvt_geometry> merge_rings(std::vector<mvt_geometry> g) {
@@ -165,7 +168,7 @@ static void fail(png_structp png_ptr, png_const_charp error_msg) {
 	exit(EXIT_FAILURE);
 }
 
-void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long long zoom_max) {
+void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long long zoom_max, double mean, double stddev) {
 	bool anything = false;
 	std::string compressed;
 
@@ -173,7 +176,10 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long 
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 
-			count = root(exp(log(levels) * count_gamma) * count / zoom_max);
+			double c2 = count / 45 / exp(log(2.3) * (32 - (z + detail)));
+			double q = (.5 + .5 * erf((log(c2) - mean) / (sqrt(2) * stddev)));
+
+			count = q * (levels - 1);
 			if (count > levels - 1) {
 				count = levels - 1;
 			}
@@ -420,7 +426,7 @@ void *run_tile(void *p) {
 						if (t->pass == 0) {
 							gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 						} else {
-							make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z]);
+							make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z], t->mean, t->stddev);
 						}
 					} else {
 						t->partial_tiles.push_back(t->tiles[z]);
@@ -458,7 +464,7 @@ void *run_tile(void *p) {
 				if (t->pass == 0) {
 					gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 				} else {
-					make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z]);
+					make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z], t->mean, t->stddev);
 				}
 			} else {
 				t->partial_tiles.push_back(t->tiles[z]);
@@ -536,6 +542,40 @@ void write_meta(std::vector<long long> const &zoom_max, sqlite3 *outdb) {
 		exit(EXIT_FAILURE);
 	}
 	sqlite3_free(sql);
+}
+
+void calc_density(unsigned char *map, size_t len, double *mean, double *stddev) {
+	double sum = 0;
+	size_t count = 0;
+	std::vector<double> values;
+
+	for (size_t i = 0; i < 500; i++) {
+		size_t off = (((len - RECORD_BYTES) * i / 500) / RECORD_BYTES) * RECORD_BYTES;
+
+		unsigned long long index1 = read64(map + off);
+		unsigned long long count1 = read32(map + off + INDEX_BYTES);
+		unsigned long long index2 = read64(map + off + RECORD_BYTES);
+
+		double density = log((double) count1 / (index2 - index1));
+
+		sum += density;
+		count += 1;
+		values.push_back(density);
+
+		// printf("%.15f\n", exp(density));
+	}
+
+	*mean = sum / count;
+
+	sum = 0;
+	for (size_t i = 0; i < count; i++) {
+		sum += (values[i] - *mean) * (values[i] - *mean);
+	}
+
+	*stddev = sqrt(sum / count);
+
+	printf("%f %f (%f %f)\n", *mean, *stddev, exp(*mean), exp(*stddev));
+	exit(0);
 }
 
 int main(int argc, char **argv) {
@@ -642,7 +682,13 @@ int main(int argc, char **argv) {
 	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;
 	std::vector<long long> zoom_max;
 
-	for (size_t pass = 0; pass < 2; pass++) {
+	double mean, stddev;
+	calc_density(map + HEADER_LEN, st.st_size - HEADER_LEN, &mean, &stddev);
+	for (size_t z = 0; z < zooms; z++) {
+		printf("%zu: %f\n", z, exp(mean + 3 * stddev) * exp(log(2.3) * (32 - (z + detail))));
+	}
+
+	for (size_t pass = 1; pass < 2; pass++) {
 		volatile int progress[cpus];
 		std::vector<tiler> tilers;
 		tilers.resize(cpus);
@@ -666,6 +712,8 @@ int main(int argc, char **argv) {
 			tilers[j].maxzoom = zooms - 1;
 			tilers[j].pass = pass;
 			tilers[j].zoom_max = zoom_max;
+			tilers[j].mean = mean;
+			tilers[j].stddev = stddev;
 		}
 
 		size_t records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
@@ -723,7 +771,7 @@ int main(int argc, char **argv) {
 			if (pass == 0) {
 				gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail, tilers[0].max[a->second.z]);
 			} else {
-				make_tile(outdb, a->second, a->second.z, detail, zooms - 1, zoom_max[a->second.z]);
+				make_tile(outdb, a->second, a->second.z, detail, zooms - 1, zoom_max[a->second.z], mean, stddev);
 			}
 		}
 
