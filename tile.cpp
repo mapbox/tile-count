@@ -545,58 +545,71 @@ void write_meta(std::vector<long long> const &zoom_max, sqlite3 *outdb) {
 	sqlite3_free(sql);
 }
 
-void calc_density(unsigned char *map, size_t len, double *mean, double *stddev) {
-	double sum = 0;
-	size_t count = 0;
-	std::vector<double> values;
+void calc_density(unsigned char *map, size_t len, double *mean, double *stddev, size_t zooms, size_t detail) {
+	for (size_t z = detail; z < zooms + detail; z++) {
+		unsigned long long mask = (unsigned long) -1LL;
+		int shift = 0;
+		if (z <= 32) {
+			mask <<= 2 * (32 - z);
+			shift = 2 * (32 - z);
+		}
+		printf("%llx\n", mask);
 
-	for (size_t i = 0; i < 500; i++) {
-		size_t off = (((len - RECORD_BYTES) * i / 500) / RECORD_BYTES) * RECORD_BYTES;
+		double sum = 0;
+		size_t count = 0;
+		std::vector<double> values;
 
-		unsigned long long index1 = read64(map + off);
-		unsigned long long count1 = read32(map + off + INDEX_BYTES);
-		unsigned long long index2 = read64(map + off + RECORD_BYTES);
-		unsigned long long count2 = read32(map + off + RECORD_BYTES + INDEX_BYTES);
+#define SAMPLES 40
+		for (size_t i = 0; i < SAMPLES; i++) {
+			size_t off = (((len - RECORD_BYTES) * i / SAMPLES) / RECORD_BYTES) * RECORD_BYTES;
 
-#if 0
-		unsigned wx1, wy1, wx2, wy2;
-		decode(index1, &wx1, &wy1);
-		decode(index2, &wx2, &wy2);
+			unsigned long long index1 = read64(map + off) & mask;
+			while (off > 0 && (read64(map + off - RECORD_BYTES) & mask) == index1) {
+				off -= RECORD_BYTES;
+			}
 
-		double lon1, lat1, lon2, lat2;
-		projection->unproject(wx1, wy1, 32, &lon1, &lat1);
-		projection->unproject(wx2, wy2, 32, &lon2, &lat2);
+			unsigned long long count1 = 0;
+			while (off < len && (read64(map + off) & mask) == index1) {
+				count1 += read32(map + off + INDEX_BYTES);
+				off += RECORD_BYTES;
+			}
 
-		double rat = cos(lat1 * M_PI / 180);
-		double latd = lat2 - lat1;
-		double lond = (lon2 - lon1) * rat;
-		double d = sqrt(latd * latd + lond * lond) / .00000274;
-#endif
+			if (off >= len) {
+				continue;
+			}
 
-		// Distance to adjacent point, approximately in feet
-		double distance = sqrt(index2 - index1) / 33;
-		distance /= sqrt((count1 + count2) / 2);
+			unsigned long long index2 = read64(map + off) & mask;
+			unsigned long long count2 = 0;
+			while (off < len && (read64(map + off) & mask) == index2) {
+				count2 += read32(map + off + INDEX_BYTES);
+				off += RECORD_BYTES;
+			}
 
-		double density = log((double) 1 / (index2 - index1));
+			// Distance to adjacent point
+			double distance = sqrt((index2 >> shift) - (index1 >> shift));
+			// printf("%f %f ", distance, sqrt((count1 + count2) / 2));
+			distance /= sqrt((count1 + count2) / 2);
+			// printf("%f\n", distance);
 
-		sum += distance;
-		count += 1;
-		values.push_back(distance);
+			sum += log(distance);
+			count += 1;
+			values.push_back(log(distance));
 
-		// printf("%.15f\n", distance);
-		// printf("%.15f    %llx %llx    %lld %f   %f %f\n", exp(density), index1, index2, index2 - index1, d, latd, lond);
+			// printf("%.15f\n", distance);
+			// printf("%.15f    %llx %llx    %lld %f   %f %f\n", exp(density), index1, index2, index2 - index1, d, latd, lond);
+		}
+
+		*mean = sum / count;
+
+		sum = 0;
+		for (size_t i = 0; i < count; i++) {
+			sum += (values[i] - *mean) * (values[i] - *mean);
+		}
+
+		*stddev = sqrt(sum / count);
+
+		printf("%f %f (%f %f) max %f\n", *mean, *stddev, exp(*mean), exp(*stddev), exp(*mean + 3 * *stddev));
 	}
-
-	*mean = sum / count;
-
-	sum = 0;
-	for (size_t i = 0; i < count; i++) {
-		sum += (values[i] - *mean) * (values[i] - *mean);
-	}
-
-	*stddev = sqrt(sum / count);
-
-	printf("%f %f (%f %f)\n", *mean, *stddev, exp(*mean), exp(*stddev));
 	exit(0);
 }
 
@@ -709,7 +722,7 @@ int main(int argc, char **argv) {
 	std::vector<long long> zoom_max;
 
 	double mean, stddev;
-	calc_density(map + HEADER_LEN, st.st_size - HEADER_LEN, &mean, &stddev);
+	calc_density(map + HEADER_LEN, st.st_size - HEADER_LEN, &mean, &stddev, zooms, detail);
 	for (size_t z = 0; z < zooms; z++) {
 		printf("%zu: %f\n", z, exp(mean + 3 * stddev) * exp(log(2.3) * (32 - (z + detail))));
 	}
