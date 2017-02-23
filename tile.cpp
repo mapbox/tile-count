@@ -31,6 +31,8 @@ bool bitmap = false;
 int color = 0x888888;
 int white = 0;
 
+bool quiet = false;
+
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s [options] -z zoom -o out.mbtiles file.count\n", argv[0]);
 }
@@ -371,7 +373,9 @@ void *run_tile(void *p) {
 			}
 			sum /= t->cpus;
 
-			fprintf(stderr, "  %lu%%\r", sum / 2 + 50 * t->pass);
+			if (!quiet) {
+				fprintf(stderr, "  %lu%%\r", sum / 2 + 50 * t->pass);
+			}
 		}
 
 		unsigned wx, wy;
@@ -496,10 +500,7 @@ void regress(std::vector<long long> &max) {
 	double m = (max.size() * sum_xy - sum_x * sum_y) / (max.size() * sum_x2 - (sum_x * sum_x));
 	double b = (sum_y * sum_x2 - sum_x * sum_xy) / (max.size() * sum_x2 - (sum_x * sum_x));
 
-	printf("chose %f\n", 1 / exp(m));
-
 	for (size_t i = 0; i < max.size(); i++) {
-		printf("%zu %lld %f\n", i, max[i], exp(m * i + b));
 		max[i] = exp(m * i + b);
 		if (max[i] < 1) {
 			max[i] = 1;
@@ -548,7 +549,7 @@ int main(int argc, char **argv) {
 	size_t detail = 9;
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:bwc:")) != -1) {
+	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:bwc:q")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -560,6 +561,10 @@ int main(int argc, char **argv) {
 
 		case 'd':
 			detail = atoi(optarg);
+			break;
+
+		case 'q':
+			quiet = true;
 			break;
 
 		case 'l':
@@ -717,8 +722,6 @@ int main(int argc, char **argv) {
 			}
 		}
 
-		clock_t clock_a = clock();
-
 		for (auto a = partials.begin(); a != partials.end(); a++) {
 			if (pass == 0) {
 				gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail, tilers[0].max[a->second.z]);
@@ -726,8 +729,6 @@ int main(int argc, char **argv) {
 				make_tile(outdb, a->second, a->second.z, detail, zooms - 1, zoom_max[a->second.z]);
 			}
 		}
-
-		clock_t clock_b = clock();
 
 		if (pass == 0) {
 			std::vector<kll<long long>> quantiles;
@@ -771,7 +772,6 @@ int main(int argc, char **argv) {
 
 			long long max = 0;
 			for (size_t j = 0; j < cpus; j++) {
-				printf("%lld\n", tilers[j].atmid);
 				if (tilers[j].atmid > max) {
 					max = tilers[j].atmid;
 					tile2lonlat(tilers[j].midx, tilers[j].midy, 32, &midlon, &midlat);
@@ -781,11 +781,6 @@ int main(int argc, char **argv) {
 			tile2lonlat(file_bbox[0], file_bbox[1], 32, &minlon, &maxlat);
 			tile2lonlat(file_bbox[2], file_bbox[3], 32, &maxlon, &minlat);
 		}
-
-		clock_t clock_c = clock();
-
-		printf("a-b: %f\n", (double) (clock_b - clock_a));
-		printf("b-c: %f\n", (double) (clock_c - clock_b));
 	}
 
 	layermap_entry lme(0);
