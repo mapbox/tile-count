@@ -555,14 +555,35 @@ void calc_density(unsigned char *map, size_t len, double *mean, double *stddev) 
 		unsigned long long index1 = read64(map + off);
 		unsigned long long count1 = read32(map + off + INDEX_BYTES);
 		unsigned long long index2 = read64(map + off + RECORD_BYTES);
+		unsigned long long count2 = read32(map + off + RECORD_BYTES + INDEX_BYTES);
 
-		double density = log((double) count1 / (index2 - index1));
+#if 0
+		unsigned wx1, wy1, wx2, wy2;
+		decode(index1, &wx1, &wy1);
+		decode(index2, &wx2, &wy2);
 
-		sum += density;
+		double lon1, lat1, lon2, lat2;
+		projection->unproject(wx1, wy1, 32, &lon1, &lat1);
+		projection->unproject(wx2, wy2, 32, &lon2, &lat2);
+
+		double rat = cos(lat1 * M_PI / 180);
+		double latd = lat2 - lat1;
+		double lond = (lon2 - lon1) * rat;
+		double d = sqrt(latd * latd + lond * lond) / .00000274;
+#endif
+
+		// Distance to adjacent point, approximately in feet
+		double distance = sqrt(index2 - index1) / 33;
+		distance /= sqrt((count1 + count2) / 2);
+
+		double density = log((double) 1 / (index2 - index1));
+
+		sum += distance;
 		count += 1;
-		values.push_back(density);
+		values.push_back(distance);
 
-		// printf("%.15f\n", exp(density));
+		// printf("%.15f\n", distance);
+		// printf("%.15f    %llx %llx    %lld %f   %f %f\n", exp(density), index1, index2, index2 - index1, d, latd, lond);
 	}
 
 	*mean = sum / count;
