@@ -32,6 +32,8 @@ bool bitmap = false;
 int color = 0x888888;
 int white = 0;
 
+bool quiet = false;
+
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s [options] -z zoom -o out.mbtiles file.count\n", argv[0]);
 }
@@ -372,7 +374,9 @@ void *run_tile(void *p) {
 			}
 			sum /= t->cpus;
 
-			fprintf(stderr, "  %lu%%\r", sum / 2 + 50 * t->pass);
+			if (!quiet) {
+				fprintf(stderr, "  %lu%%\r", sum / 2 + 50 * t->pass);
+			}
 		}
 
 		unsigned wx, wy;
@@ -497,10 +501,7 @@ void regress(std::vector<long long> &max) {
 	double m = (max.size() * sum_xy - sum_x * sum_y) / (max.size() * sum_x2 - (sum_x * sum_x));
 	double b = (sum_y * sum_x2 - sum_x * sum_xy) / (max.size() * sum_x2 - (sum_x * sum_x));
 
-	printf("chose %f\n", 1 / exp(m));
-
 	for (size_t i = 0; i < max.size(); i++) {
-		printf("%zu %lld %f\n", i, max[i], exp(m * i + b));
 		max[i] = exp(m * i + b);
 		if (max[i] < 1) {
 			max[i] = 1;
@@ -745,7 +746,7 @@ int main(int argc, char **argv) {
 	size_t detail = 9;
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:bwc:")) != -1) {
+	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:bwc:q")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -757,6 +758,10 @@ int main(int argc, char **argv) {
 
 		case 'd':
 			detail = atoi(optarg);
+			break;
+
+		case 'q':
+			quiet = true;
 			break;
 
 		case 'l':

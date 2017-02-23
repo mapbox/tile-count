@@ -21,7 +21,7 @@ struct merger {
 	}
 };
 
-unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom) {
+unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom, bool quiet, volatile int *progress, size_t shard, size_t nshards) {
 	std::priority_queue<merger> q;
 
 	unsigned long long mask = 0;
@@ -72,7 +72,16 @@ unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned c
 		along++;
 		long long report = 100 * along / nrec;
 		if (report != reported) {
-			fprintf(stderr, "Merging: %lld%%     \r", report);
+			progress[shard] = report;
+			int sum = 0;
+			for (size_t i = 0; i < nshards; i++) {
+				sum += progress[i];
+			}
+			sum /= nshards;
+
+			if (!quiet) {
+				fprintf(stderr, "Merging: %d%%     \r", sum);
+			}
 			reported = report;
 		}
 	}
@@ -92,6 +101,11 @@ struct merge_arg {
 	size_t len;
 	unsigned char *out;
 	int zoom;
+	bool quiet;
+
+	int *progress;
+	size_t shard;
+	size_t nshards;
 };
 
 struct finder {
@@ -105,20 +119,18 @@ struct finder {
 void *run_merge(void *va) {
 	merge_arg *a = (merge_arg *) va;
 
-	// XXX fix progress
 	size_t nrec = 0;
 	for (size_t i = 0; i < a->mergers.size(); i++) {
 		nrec += (a->mergers[i].end - a->mergers[i].start) / RECORD_BYTES;
 	}
 
-	unsigned char *end = do_merge1(a->mergers, a->mergers.size(), a->out + a->off, RECORD_BYTES, nrec, a->zoom);
+	unsigned char *end = do_merge1(a->mergers, a->mergers.size(), a->out + a->off, RECORD_BYTES, nrec, a->zoom, a->quiet, a->progress, a->shard, a->nshards);
 	a->outlen = end - (a->out + a->off);
-	fprintf(stderr, "done\n");
 
 	return NULL;
 }
 
-void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long nrec, int zoom) {
+void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long nrec, int zoom, bool quiet) {
 	unsigned long long mask = 0;
 	if (zoom != 0) {
 		mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);
@@ -180,12 +192,16 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 		}
 	}
 
+	int progress[cpus];
 	std::vector<merge_arg> args;
 
 	for (size_t i = 0; i < cpus; i++) {
-		fprintf(stderr, "    %zu: avg %llx\n", i, beginning[i]);
-
 		merge_arg ma;
+
+		progress[i] = 0;
+		ma.progress = progress;
+		ma.shard = i;
+		ma.nshards = cpus;
 
 		for (size_t j = 0; j < nmerges; j++) {
 			finder *fs = (finder *) (merges[j].map + merges[j].start);
@@ -196,11 +212,6 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 			write64(&p, beginning[i] & mask);
 
 			finder *l = std::lower_bound(fs, fe, look);
-			if (l == fe) {
-				// printf("   at end\n");
-			} else {
-				// printf("   %zu: found %llx\n", j, read64(l->data));
-			}
 
 			merger m;
 			m.start = (unsigned char *) l;
@@ -214,9 +225,8 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 			ma.mergers.push_back(m);
 		}
 
+		ma.quiet = quiet;
 		args.push_back(ma);
-
-		// printf("\n");
 	}
 
 	size_t off = HEADER_LEN;

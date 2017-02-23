@@ -9,6 +9,8 @@
 #include "serial.hpp"
 #include "merge.hpp"
 
+bool quiet = false;
+
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s -o merged.count file.count ...\n", argv[0]);
 }
@@ -21,7 +23,7 @@ int main(int argc, char **argv) {
 	int zoom = 32;
 
 	int i;
-	while ((i = getopt(argc, argv, "o:z:")) != -1) {
+	while ((i = getopt(argc, argv, "o:z:q")) != -1) {
 		switch (i) {
 		case 'z':
 			zoom = atoi(optarg);
@@ -29,6 +31,10 @@ int main(int argc, char **argv) {
 
 		case 'o':
 			outfile = optarg;
+			break;
+
+		case 'q':
+			quiet = true;
 			break;
 
 		default:
@@ -91,7 +97,7 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	do_merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom);
+	do_merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom, quiet);
 	if (close(out) != 0) {
 		perror("close");
 		exit(EXIT_FAILURE);
