@@ -6,10 +6,11 @@ A tool for accumulating point counts by tile.
 Creating a count
 ----------------
 
-    tile-count-create [-z zoom] -o out.count [file.csv ...] [file.json ...]
+    tile-count-create [-q] [-z zoom] -o out.count [file.csv ...] [file.json ...]
 
-The `-z` option specifies the maximum precision of the data, so that duplicates
+* The `-z` option specifies the maximum precision of the data, so that duplicates
 beyond this precision can be pre-summed to make the data file smaller.
+* The `-q` option silences the progress indicator.
 
 If the input is CSV, it is a list of records in the form:
 
@@ -32,13 +33,13 @@ summed.
 Merging counts
 --------------
 
-    tile-count-merge -o out.count [-z zoom] in1.count [in2.count ...]
+    tile-count-merge [-q] [-z zoom] -o out.count in1.count [in2.count ...]
 
 Produces a new count file from the specified count files, summing the counts for any points
 duplicated between the two.
 
-If you specify a `zoom`, the precision of all locations in the output file will be reduced
-as specified.
+* `-z zoom`: The precision of all locations in the output file will be reduced as specified.
+* `-q': Silence the progress indicator
 
 Decoding counts
 ---------------
@@ -68,6 +69,7 @@ normalized according the densest point in the zoom level.
 * `-l` *levels*: Quantize the normalized counts within each tile into the specified number of levels. The default is 50.
 * `-m` *level*: Don't include normalized counts that are quantized below the specified level. The default is 6. In bitmap tiles, all levels are included.
 * `-g` *gamma*: Scale the counts within each tile to the gamma'th root of their linear value. The default is 2.5.
+* `-q`: Silence the progress indicator
 
 * `-b`: Create PNG raster tiles instead of vectors. If you are not planning to use these tiles with Mapbox GL,
         You will probably also want to specify `-d8` for normal 256x256 web map tile resolution.

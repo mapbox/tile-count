@@ -15,13 +15,17 @@ extern "C" {
 #include "jsonpull/jsonpull.h"
 }
 
+bool quiet = false;
+
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s -o out.count [-z zoom] [in.csv ...]\n", argv[0]);
 }
 
 void write_point(FILE *out, long long &seq, double lon, double lat, unsigned long long count) {
 	if (seq % 100000 == 0) {
-		fprintf(stderr, "Read %.1f million records\r", seq / 1000000.0);
+		if (!quiet) {
+			fprintf(stderr, "Read %.1f million records\r", seq / 1000000.0);
+		}
 	}
 	seq++;
 
@@ -164,7 +168,9 @@ void sort_and_merge(int fd, int out, int zoom) {
 	}
 
 	for (size_t i = 0; i < nmerges; i += cpus) {
-		fprintf(stderr, "Sorting part %zu of %zu     \r", i + 1, nmerges);
+		if (!quiet) {
+			fprintf(stderr, "Sorting part %zu of %zu     \r", i + 1, nmerges);
+		}
 
 		pthread_t pthreads[cpus];
 		for (size_t j = 0; j < cpus && i + j < nmerges; j++) {
@@ -201,7 +207,7 @@ void sort_and_merge(int fd, int out, int zoom) {
 			merges[i].map = (unsigned char *) map;
 		}
 
-		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom);
+		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom, quiet);
 		munmap(map, st.st_size);
 	}
 }
@@ -214,7 +220,7 @@ int main(int argc, char **argv) {
 	int zoom = 32;
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:")) != -1) {
+	while ((i = getopt(argc, argv, "fz:o:q")) != -1) {
 		switch (i) {
 		case 'z':
 			zoom = atoi(optarg);
@@ -222,6 +228,10 @@ int main(int argc, char **argv) {
 
 		case 'o':
 			outfile = optarg;
+			break;
+
+		case 'q':
+			quiet = true;
 			break;
 
 		default:
@@ -270,7 +280,9 @@ int main(int argc, char **argv) {
 			}
 		}
 	}
-	fprintf(stderr, "Total of %lld\n", seq);
+	if (!quiet) {
+		fprintf(stderr, "Total of %lld\n", seq);
+	}
 
 	if (fflush(fp) != 0) {
 		perror("flush output file");
