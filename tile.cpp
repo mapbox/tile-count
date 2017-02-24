@@ -589,6 +589,71 @@ struct tile_reader {
 	}
 };
 
+struct read_state {
+	const char *base;
+	size_t off;
+	size_t len;
+};
+
+void user_read_data(png_structp png_ptr, png_bytep data, png_size_t length) {
+	struct read_state *state = (struct read_state *) png_get_io_ptr(png_ptr);
+
+	if (state->off + length > state->len) {
+		length = state->len - state->off;
+	}
+
+	memcpy(data, state->base + state->off, length);
+	state->off += length;
+}
+
+void *retile(void *v) {
+	std::vector<tile_reader *> *queue = (std::vector<tile_reader *> *) v;
+
+	for (size_t i = 0; i < queue->size(); i++) {
+		png_structp png_ptr;
+		png_infop info_ptr;
+
+		struct read_state state;
+		state.base = (*queue)[i]->data.c_str();
+		state.off = 0;
+		state.len = (*queue)[i]->data.length();
+
+		png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
+		if (png_ptr == NULL) {
+			fprintf(stderr, "PNG init failed\n");
+			exit(EXIT_FAILURE);
+		}
+
+		info_ptr = png_create_info_struct(png_ptr);
+		if (info_ptr == NULL) {
+			fprintf(stderr, "PNG init failed\n");
+			exit(EXIT_FAILURE);
+		}
+
+		png_set_read_fn(png_ptr, &state, user_read_data);
+		png_set_sig_bytes(png_ptr, 0);
+
+		png_read_png(png_ptr, info_ptr, 0, NULL);
+
+		png_uint_32 width, height;
+		int bit_depth;
+		int color_type, interlace_type;
+
+		png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, &interlace_type, NULL, NULL);
+
+		unsigned int row_bytes = png_get_rowbytes(png_ptr, info_ptr);
+		png_bytepp row_pointers = png_get_rows(png_ptr, info_ptr);
+
+		for (size_t n = 0; n < height; n++) {
+			// memcpy(i->buf + row_bytes * n, row_pointers[n], row_bytes);
+		}
+
+		png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+	}
+
+	return NULL;
+}
+
 void merge(std::vector<tile_reader> &r, size_t cpus) {
 	std::vector<std::vector<tile_reader *>> queues;
 	queues.resize(cpus);
@@ -602,14 +667,23 @@ void merge(std::vector<tile_reader> &r, size_t cpus) {
 		}
 	}
 
+	pthread_t pthreads[cpus];
+
 	for (size_t i = 0; i < cpus; i++) {
-		for (size_t j = 0; j < queues[i].size(); j++) {
-			printf("%d/%d/%d ", queues[i][j]->zoom, queues[i][j]->x, queues[i][j]->y());
+		if (pthread_create(&pthreads[i], NULL, retile, &queues[i]) != 0) {
+			perror("pthread_create");
+			exit(EXIT_FAILURE);
 		}
-		printf("\n");
 	}
 
-	printf("\n");
+	for (size_t i = 0; i < cpus; i++) {
+		void *ret;
+
+		if (pthread_join(pthreads[i], &ret) != 0) {
+			perror("pthread_join");
+			exit(EXIT_FAILURE);
+		}
+	}
 }
 
 std::vector<long long> parse_max_density(const unsigned char *v) {
