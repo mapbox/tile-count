@@ -150,14 +150,6 @@ void gather_quantile(kll<long long> &kll, tile const &tile, int detail, long lon
 	}
 }
 
-inline double root(double val) {
-	if (val == 0) {
-		return 0;
-	} else {
-		return exp(log(val) / count_gamma);
-	}
-}
-
 void string_append(png_structp png_ptr, png_bytep data, png_size_t length) {
 	std::string *s = (std::string *) png_get_io_ptr(png_ptr);
 	s->append(std::string(data, data + length));
@@ -168,7 +160,7 @@ static void fail(png_structp png_ptr, png_const_charp error_msg) {
 	exit(EXIT_FAILURE);
 }
 
-void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long long zoom_max) {
+void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max) {
 	bool anything = false;
 	std::string compressed;
 
@@ -176,7 +168,9 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, int maxzoom, long 
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
 
-			count = root(exp(log(levels) * count_gamma) * count / zoom_max);
+			if (count > 0) {
+				count = exp(log(exp(log(levels) * count_gamma) * count / zoom_max) / count_gamma);
+			}
 			if (count > levels - 1) {
 				count = levels - 1;
 			}
@@ -425,7 +419,7 @@ void *run_tile(void *p) {
 						if (t->pass == 0) {
 							gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 						} else {
-							make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z]);
+							make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z]);
 						}
 					} else {
 						t->partial_tiles.push_back(t->tiles[z]);
@@ -463,7 +457,7 @@ void *run_tile(void *p) {
 				if (t->pass == 0) {
 					gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 				} else {
-					make_tile(t->outdb, t->tiles[z], z, t->detail, t->maxzoom, t->zoom_max[z]);
+					make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z]);
 				}
 			} else {
 				t->partial_tiles.push_back(t->tiles[z]);
@@ -543,6 +537,7 @@ void write_meta(std::vector<long long> const &zoom_max, sqlite3 *outdb) {
 struct tile_reader {
 	sqlite3 *db = NULL;
 	sqlite3_stmt *stmt = NULL;
+	sqlite3 *outdb = NULL;
 	std::string name;
 
 	int zoom = 0;
@@ -553,6 +548,7 @@ struct tile_reader {
 	int density_levels;
 	double density_gamma;
 	std::vector<long long> max_density;
+	std::vector<long long> global_density;
 
 	int y() {
 		return (1LL << zoom) - 1 - sorty;
@@ -609,7 +605,10 @@ void user_read_data(png_structp png_ptr, png_bytep data, png_size_t length) {
 void *retile(void *v) {
 	std::vector<tile_reader *> *queue = (std::vector<tile_reader *> *) v;
 
+	tile t(0, 0);
+
 	for (size_t i = 0; i < queue->size(); i++) {
+		printf("%d/%d/%d\n", (*queue)[i]->zoom, (*queue)[i]->x, (*queue)[i]->y());
 		png_structp png_ptr;
 		png_infop info_ptr;
 
@@ -640,15 +639,48 @@ void *retile(void *v) {
 		int color_type, interlace_type;
 
 		png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, &interlace_type, NULL, NULL);
+		if (bit_depth != 8 || color_type != PNG_COLOR_TYPE_PALETTE || width != height) {
+			fprintf(stderr, "Misencoded PNG\n");
+			exit(EXIT_FAILURE);
+		}
 
-		unsigned int row_bytes = png_get_rowbytes(png_ptr, info_ptr);
+		if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y()) {
+			if (t.active) {
+				make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z]);
+			}
+
+			t.active = true;
+			t.z = (*queue)[i]->zoom;
+			t.x = (*queue)[i]->x;
+			t.y = (*queue)[i]->y();
+			t.count.resize(width * height);
+
+			for (size_t j = 0; j < width * height; j++) {
+				t.count[j] = 0;
+			}
+		}
+
+		double gamma = (*queue)[i]->density_gamma;
+		long long zoom_max = (*queue)[i]->max_density[(*queue)[i]->zoom];
+
 		png_bytepp row_pointers = png_get_rows(png_ptr, info_ptr);
+		for (size_t y = 0; y < height; y++) {
+			unsigned char *bytes = row_pointers[y];
 
-		for (size_t n = 0; n < height; n++) {
-			// memcpy(i->buf + row_bytes * n, row_pointers[n], row_bytes);
+			for (size_t x = 0; x < width; x++) {
+				if (bytes[x] > 0) {
+					double bright = bytes[x];
+					double count = exp(log(bright) * gamma) * zoom_max / exp(log(levels) * gamma);
+					t.count[width * y + x] += count;
+				}
+			}
 		}
 
 		png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+	}
+
+	if (t.active) {
+		make_tile((*queue)[0]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[0]->global_density[t.z]);
 	}
 
 	return NULL;
@@ -703,12 +735,13 @@ std::vector<long long> parse_max_density(const unsigned char *v) {
 	return out;
 }
 
-void merge_tiles(char **fnames, size_t n, size_t cpus) {
-	std::priority_queue<tile_reader> readers;
+void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb) {
+	std::vector<tile_reader> readers;
 
 	for (size_t i = 0; i < n; i++) {
 		tile_reader r;
 		r.name = fnames[i];
+		r.outdb = outdb;
 
 		if (sqlite3_open(fnames[i], &r.db) != SQLITE_OK) {
 			fprintf(stderr, "%s: %s\n", fnames[i], sqlite3_errmsg(r.db));
@@ -760,7 +793,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus) {
 			const char *data = (const char *) sqlite3_column_blob(r.stmt, 3);
 			size_t len = sqlite3_column_bytes(r.stmt, 3);
 			r.data = std::string(data, len);
-			readers.push(r);
+			readers.push_back(r);
 		} else {
 			sqlite3_finalize(r.stmt);
 
@@ -771,11 +804,31 @@ void merge_tiles(char **fnames, size_t n, size_t cpus) {
 		}
 	}
 
-	std::vector<tile_reader> to_merge;
+	// XXX This doesn't detect if two sources brighten the same pixel together
+	std::vector<long long> global_density;
+	for (size_t i = 0; i < readers.size(); i++) {
+		if (readers[i].max_density.size() > global_density.size()) {
+			global_density.resize(readers[i].max_density.size());
+		}
 
-	while (readers.size() != 0) {
-		tile_reader r = readers.top();
-		readers.pop();
+		for (size_t j = 0; j < readers[i].max_density.size(); j++) {
+			if (readers[i].max_density[j] > global_density[j]) {
+				global_density[j] = readers[i].max_density[j];
+			}
+		}
+	}
+
+	std::priority_queue<tile_reader> reader_q;
+	for (size_t i = 0; i < readers.size(); i++) {
+		readers[i].global_density = global_density;
+		reader_q.push(readers[i]);
+	}
+	readers.clear();
+
+	std::vector<tile_reader> to_merge;
+	while (reader_q.size() != 0) {
+		tile_reader r = reader_q.top();
+		reader_q.pop();
 
 		if (to_merge.size() > 50 * cpus) {
 			tile_reader &last = to_merge[to_merge.size() - 1];
@@ -796,7 +849,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus) {
 			size_t len = sqlite3_column_bytes(r.stmt, 3);
 			r.data = std::string(data, len);
 
-			readers.push(r);
+			reader_q.push(r);
 		} else {
 			sqlite3_finalize(r.stmt);
 
@@ -1030,7 +1083,7 @@ int main(int argc, char **argv) {
 				if (pass == 0) {
 					gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail, tilers[0].max[a->second.z]);
 				} else {
-					make_tile(outdb, a->second, a->second.z, detail, zooms - 1, zoom_max[a->second.z]);
+					make_tile(outdb, a->second, a->second.z, detail, zoom_max[a->second.z]);
 				}
 			}
 
@@ -1086,7 +1139,7 @@ int main(int argc, char **argv) {
 		}
 	} else {
 		fprintf(stderr, "going to merge %zu zoom levels\n", zooms);
-		merge_tiles(argv + optind, argc - optind, cpus);
+		merge_tiles(argv + optind, argc - optind, cpus, outdb);
 	}
 
 	layermap_entry lme(0);
