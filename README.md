@@ -52,6 +52,7 @@ Tiling
 ------
 
     tile-count-tile [options] -o out.mbtiles -z zoom in.count
+    tile-count-tile [options] -o out.mbtiles in.mbtiles [ … in.mbtiles ]
 
 The _zoom_ is the size of the bins, not the maximum zoom of the tileset,
 so for instance a `-z24` run would produce tiles of zooms 0 through 15.
@@ -62,6 +63,13 @@ The default _detail_ is 9 if you don't specify one.
 The features in the `mbtiles` are a grid of squares with a `density` attribute
 indicating how many original points were accumulated into that binned point,
 normalized according the densest point in the zoom level.
+
+If you are merging existing `.mbtiles` files, they all have to have been created
+with the same `-z zoom` option, and with `-b`. The merged output can be either
+bitmap or vector as desired. The `.mbtiles` files being merged should be separated
+spatially, not temporally, because merging does not recalculate the reference
+brightness where tilesets overlap. Use `tile-count-merge` to combine data sets
+that are for the same area.
 
 * `-f`: Delete any existing file named `out.mbtiles`.
 * `-z` *zoom*: Use buckets the size of a tile in zoom level *zoom*.

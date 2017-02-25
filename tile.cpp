@@ -735,7 +735,7 @@ std::vector<long long> parse_max_density(const unsigned char *v) {
 	return out;
 }
 
-void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb) {
+void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms) {
 	std::vector<tile_reader> readers;
 
 	for (size_t i = 0; i < n; i++) {
@@ -775,6 +775,16 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb) {
 			} else {
 				fprintf(stderr, "%s: No density_gamma value in metadata\n", fnames[i]);
 				exit(EXIT_FAILURE);
+			}
+			sqlite3_finalize(stmt);
+		}
+
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'maxzoom'", -1, &stmt, NULL) == SQLITE_OK) {
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				if (sqlite3_column_int(stmt, 0) + 1 != zooms) {
+					fprintf(stderr, "%s: Mismatched number of zoom levels (%d)\n", fnames[i], sqlite3_column_int(stmt, 0) + 1);
+					exit(EXIT_FAILURE);
+				}
 			}
 			sqlite3_finalize(stmt);
 		}
@@ -1139,7 +1149,7 @@ int main(int argc, char **argv) {
 		}
 	} else {
 		fprintf(stderr, "going to merge %zu zoom levels\n", zooms);
-		merge_tiles(argv + optind, argc - optind, cpus, outdb);
+		merge_tiles(argv + optind, argc - optind, cpus, outdb, zooms);
 	}
 
 	layermap_entry lme(0);
