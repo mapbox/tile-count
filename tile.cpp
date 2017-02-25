@@ -661,6 +661,7 @@ void *retile(void *v) {
 
 		double gamma = (*queue)[i]->density_gamma;
 		long long zoom_max = (*queue)[i]->max_density[(*queue)[i]->zoom];
+		size_t density_levels = (*queue)[i]->density_levels;
 
 		png_bytepp row_pointers = png_get_rows(png_ptr, info_ptr);
 		for (size_t y = 0; y < height; y++) {
@@ -669,7 +670,7 @@ void *retile(void *v) {
 			for (size_t x = 0; x < width; x++) {
 				if (bytes[x] > 0) {
 					double bright = bytes[x];
-					double count = exp(log(bright) * gamma) * zoom_max / exp(log(levels) * gamma);
+					double count = exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma);
 					t.count[width * y + x] += count;
 				}
 			}
