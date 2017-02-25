@@ -608,7 +608,6 @@ void *retile(void *v) {
 	tile t(0, 0);
 
 	for (size_t i = 0; i < queue->size(); i++) {
-		printf("%d/%d/%d\n", (*queue)[i]->zoom, (*queue)[i]->x, (*queue)[i]->y());
 		png_structp png_ptr;
 		png_infop info_ptr;
 
@@ -737,6 +736,9 @@ std::vector<long long> parse_max_density(const unsigned char *v) {
 
 void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms) {
 	std::vector<tile_reader> readers;
+	size_t total_rows = 0;
+	size_t seq = 0;
+	size_t oprogress = 999;
 
 	for (size_t i = 0; i < n; i++) {
 		tile_reader r;
@@ -749,7 +751,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 		}
 
 		sqlite3_stmt *stmt;
-		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'max_density'", -1, &stmt, NULL) == SQLITE_OK) {
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'max_density';", -1, &stmt, NULL) == SQLITE_OK) {
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				r.max_density = parse_max_density(sqlite3_column_text(stmt, 0));
 			} else {
@@ -759,7 +761,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			sqlite3_finalize(stmt);
 		}
 
-		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'density_levels'", -1, &stmt, NULL) == SQLITE_OK) {
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'density_levels';", -1, &stmt, NULL) == SQLITE_OK) {
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				r.density_levels = sqlite3_column_int(stmt, 0);
 			} else {
@@ -769,7 +771,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			sqlite3_finalize(stmt);
 		}
 
-		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'density_gamma'", -1, &stmt, NULL) == SQLITE_OK) {
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'density_gamma';", -1, &stmt, NULL) == SQLITE_OK) {
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				r.density_gamma = sqlite3_column_double(stmt, 0);
 			} else {
@@ -779,12 +781,19 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			sqlite3_finalize(stmt);
 		}
 
-		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'maxzoom'", -1, &stmt, NULL) == SQLITE_OK) {
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'maxzoom';", -1, &stmt, NULL) == SQLITE_OK) {
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				if (sqlite3_column_int(stmt, 0) + 1 != zooms) {
 					fprintf(stderr, "%s: Mismatched number of zoom levels (%d)\n", fnames[i], sqlite3_column_int(stmt, 0) + 1);
 					exit(EXIT_FAILURE);
 				}
+			}
+			sqlite3_finalize(stmt);
+		}
+
+		if (sqlite3_prepare_v2(r.db, "SELECT max(rowid) from tiles;", -1, &stmt, NULL) == SQLITE_OK) {
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				total_rows += sqlite3_column_int(stmt, 0);
 			}
 			sqlite3_finalize(stmt);
 		}
@@ -804,6 +813,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			size_t len = sqlite3_column_bytes(r.stmt, 3);
 			r.data = std::string(data, len);
 			readers.push_back(r);
+			seq++;
 		} else {
 			sqlite3_finalize(r.stmt);
 
@@ -860,6 +870,15 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			r.data = std::string(data, len);
 
 			reader_q.push(r);
+			seq++;
+
+			size_t progress = 100 * seq / total_rows;
+			if (progress != oprogress) {
+				if (!quiet) {
+					fprintf(stderr, "  %zu%%\r", progress);
+					oprogress = progress;
+				}
+			}
 		} else {
 			sqlite3_finalize(r.stmt);
 
