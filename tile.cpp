@@ -735,11 +735,12 @@ std::vector<long long> parse_max_density(const unsigned char *v) {
 	return out;
 }
 
-void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms) {
+void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms, std::vector<long long> &zoom_max, double &midlat, double &midlon, double &minlat, double &minlon, double &maxlat, double &maxlon) {
 	std::vector<tile_reader> readers;
 	size_t total_rows = 0;
 	size_t seq = 0;
 	size_t oprogress = 999;
+	size_t biggest = 0;
 
 	for (size_t i = 0; i < n; i++) {
 		tile_reader r;
@@ -813,8 +814,39 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			const char *data = (const char *) sqlite3_column_blob(r.stmt, 3);
 			size_t len = sqlite3_column_bytes(r.stmt, 3);
 			r.data = std::string(data, len);
+
+			if (r.zoom == zooms - 1 && r.data.size() > biggest) {
+				biggest = r.data.size();
+				projection->unproject(r.x, r.y(), r.zoom, &midlon, &midlat);
+			}
+
 			readers.push_back(r);
 			seq++;
+
+			// This check is here instead of above so the bounding box is only affected if there are
+			// tiles in the tileset being merged.
+
+			if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'bounds';", -1, &stmt, NULL) == SQLITE_OK) {
+				if (sqlite3_step(stmt) == SQLITE_ROW) {
+					const unsigned char *bbox = sqlite3_column_text(stmt, 0);
+					double o1, a1, o2, a2;
+					if (sscanf((const char *) bbox, "%lf,%lf,%lf,%lf", &o1, &a1, &o2, &a2) == 4) {
+						if (o1 < minlon) {
+							minlon = o1;
+						}
+						if (a1 < minlat) {
+							minlat = a1;
+						}
+						if (o2 > maxlon) {
+							maxlon = o2;
+						}
+						if (a2 > maxlat) {
+							maxlat = a2;
+						}
+					}
+				}
+				sqlite3_finalize(stmt);
+			}
 		} else {
 			sqlite3_finalize(r.stmt);
 
@@ -826,22 +858,21 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 	}
 
 	// XXX This doesn't detect if two sources brighten the same pixel together
-	std::vector<long long> global_density;
 	for (size_t i = 0; i < readers.size(); i++) {
-		if (readers[i].max_density.size() > global_density.size()) {
-			global_density.resize(readers[i].max_density.size());
+		if (readers[i].max_density.size() > zoom_max.size()) {
+			zoom_max.resize(readers[i].max_density.size());
 		}
 
 		for (size_t j = 0; j < readers[i].max_density.size(); j++) {
-			if (readers[i].max_density[j] > global_density[j]) {
-				global_density[j] = readers[i].max_density[j];
+			if (readers[i].max_density[j] > zoom_max[j]) {
+				zoom_max[j] = readers[i].max_density[j];
 			}
 		}
 	}
 
 	std::priority_queue<tile_reader> reader_q;
 	for (size_t i = 0; i < readers.size(); i++) {
-		readers[i].global_density = global_density;
+		readers[i].global_density = zoom_max;
 		reader_q.push(readers[i]);
 	}
 	readers.clear();
@@ -869,6 +900,11 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			const char *data = (const char *) sqlite3_column_blob(r.stmt, 3);
 			size_t len = sqlite3_column_bytes(r.stmt, 3);
 			r.data = std::string(data, len);
+
+			if (r.zoom == zooms - 1 && r.data.size() > biggest) {
+				biggest = r.data.size();
+				projection->unproject(r.x, r.y(), r.zoom, &midlon, &midlat);
+			}
 
 			reader_q.push(r);
 			seq++;
@@ -978,7 +1014,7 @@ int main(int argc, char **argv) {
 	}
 	sqlite3 *outdb = mbtiles_open(outfile, argv, false);
 
-	double minlat = 0, minlon = 0, maxlat = 0, maxlon = 0, midlat = 0, midlon = 0;
+	double minlat = 90, minlon = 180, maxlat = -90, maxlon = -180, midlat = 0, midlon = 0;
 	std::vector<long long> zoom_max;
 	size_t zooms = 0;
 
@@ -1169,7 +1205,7 @@ int main(int argc, char **argv) {
 		}
 	} else {
 		fprintf(stderr, "going to merge %zu zoom levels\n", zooms);
-		merge_tiles(argv + optind, argc - optind, cpus, outdb, zooms);
+		merge_tiles(argv + optind, argc - optind, cpus, outdb, zooms, zoom_max, midlat, midlon, minlat, minlon, maxlat, maxlon);
 	}
 
 	layermap_entry lme(0);
