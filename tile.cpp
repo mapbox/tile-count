@@ -1007,7 +1007,7 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
+	size_t cpus = 2;
 
 	if (force) {
 		unlink(outfile);
