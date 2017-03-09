@@ -937,9 +937,10 @@ int main(int argc, char **argv) {
 	int zoom = -1;
 	bool force = false;
 	size_t detail = 9;
+	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:bwc:q")) != -1) {
+	while ((i = getopt(argc, argv, "fz:o:p:d:l:m:g:bwc:q")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -947,6 +948,10 @@ int main(int argc, char **argv) {
 
 		case 'z':
 			zoom = atoi(optarg);
+			break;
+
+		case 'p':
+			cpus = atoi(optarg);
 			break;
 
 		case 'd':
@@ -1006,8 +1011,6 @@ int main(int argc, char **argv) {
 		usage(argv);
 		exit(EXIT_FAILURE);
 	}
-
-	size_t cpus = 2;
 
 	if (force) {
 		unlink(outfile);
