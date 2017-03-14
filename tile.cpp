@@ -33,6 +33,8 @@ int color = 0x888888;
 int white = 0;
 
 bool quiet = false;
+bool include_density = false;
+bool include_count = false;
 
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s [options] -z zoom -o out.mbtiles file.count\n", argv[0]);
@@ -272,21 +274,21 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			if (features[i].geometry.size() != 0) {
 				// features[i].geometry = merge_rings(features[i].geometry);
 
-				{
+				if (include_density) {
 					mvt_value val;
 					val.type = mvt_uint;
 					val.numeric_value.uint_value = i;
 					layer.tag(features[i], "density", val);
 				}
 
-#if 0
-			{
-				mvt_value val;
-				val.type = mvt_uint;
-				val.numeric_value.uint_value = largest[i];
-				layer.tag(features[i], "count", val);
-			}
-#endif
+				if (include_count) {
+					double count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
+
+					mvt_value val;
+					val.type = mvt_uint;
+					val.numeric_value.uint_value = count;
+					layer.tag(features[i], "count", val);
+				}
 
 				layer.features.push_back(features[i]);
 			}
@@ -945,7 +947,7 @@ int main(int argc, char **argv) {
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:p:d:l:m:g:bwc:qn:")) != -1) {
+	while ((i = getopt(argc, argv, "fz:o:p:d:l:m:g:bwc:qn:y:")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -981,6 +983,18 @@ int main(int argc, char **argv) {
 
 		case 'm':
 			first_level = atoi(optarg);
+			break;
+
+		case 'y':
+			if (strcmp(optarg, "count") == 0) {
+				include_count = true;
+			} else if (strcmp(optarg, "density") == 0) {
+				include_density = true;
+			} else {
+				fprintf(stderr, "Unknown attribute: -y %s\n", optarg);
+				exit(EXIT_FAILURE);
+			}
+
 			break;
 
 		case 'g':
@@ -1019,6 +1033,10 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "%s: must specify -o input.mbtiles or input.count\n", argv[0]);
 		usage(argv);
 		exit(EXIT_FAILURE);
+	}
+
+	if (!(include_count || include_density)) {
+		include_density = true;
 	}
 
 	if (force) {
@@ -1223,17 +1241,19 @@ int main(int argc, char **argv) {
 
 	layermap_entry lme(0);
 
-#if 0
-	type_and_string tas;
-	tas.type = VT_NUMBER;
-	tas.string = "count";
-	lme.file_keys.insert(tas);
-#endif
+	if (include_count) {
+		type_and_string tas;
+		tas.type = VT_NUMBER;
+		tas.string = "count";
+		lme.file_keys.insert(tas);
+	}
 
-	type_and_string tas2;
-	tas2.type = VT_NUMBER;
-	tas2.string = "density";
-	lme.file_keys.insert(tas2);
+	if (include_density) {
+		type_and_string tas2;
+		tas2.type = VT_NUMBER;
+		tas2.string = "density";
+		lme.file_keys.insert(tas2);
+	}
 
 	lme.minzoom = 0;
 	lme.maxzoom = zooms - 1;

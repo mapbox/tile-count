@@ -65,25 +65,47 @@ indicating how many original points were accumulated into that binned point,
 normalized according the densest point in the zoom level.
 
 If you are merging existing `.mbtiles` files, they all have to have been created
-with the same `-z zoom` option, and with `-b`. The merged output can be either
+with the same minzoom, maxzoom, and detail, and with `-b`. The merged output can be either
 bitmap or vector as desired. The `.mbtiles` files being merged should be separated
 spatially, not temporally, because merging does not recalculate the reference
 brightness where tilesets overlap. Use `tile-count-merge` to combine data sets
 that are for the same area.
 
-* `-f`: Delete any existing file named `out.mbtiles`.
-* `-z` *zoom*: Use buckets the size of a tile in zoom level *zoom*.
-* `-p` *cpus*: Use fixed number of cpus.
+### Output tileset
+
 * `-n` *layername: Specify the layer name in vector tile output. The default is `count`.
+* `-o` *out.mbtiles*: Specify the name of the output file.
+* `-f`: Delete the output file if it already exists
+
+### Zoom levels WORK IN PROGRESS
+
 * `-d` *detail*: Make the grid within each tile 2^detail points on each side. The default is 9.
+* `-Z` *minzoom*: Specify the minzoom of the tileset. The default is 0.
+* `-z` *maxzoom*: Specify the maxzoom of the tileset.
+* `-B` *binsize*: Specify the zoom level whose tiles are used as bins.
+
+You must specify either `-z` (maxzoom) or `-B` (bin size) if you are creating a new tileset
+instead of merging existing tilesets. The `bin size` plus the `detail` always equals the `maxzoom`.
+
+### Level bucketing
+
 * `-l` *levels*: Quantize the normalized counts within each tile into the specified number of levels. The default is 50.
 * `-m` *level*: Don't include normalized counts that are quantized below the specified level. The default is 6. In bitmap tiles, all levels are included.
 * `-g` *gamma*: Scale the counts within each tile to the gamma'th root of their linear value. The default is 2.5.
-* `-q`: Silence the progress indicator
+* `-y density`: Include an attribute in each vector feature indicating the normalized density of points within each bin. This is the default.
+* `-y count`: Include an attribute in each vector feature indicating the count of points within each bin. The count is only approximate because the levels are bucketed.
+
+### Bitmap tiles
+
 * `-b`: Create PNG raster tiles instead of vectors. If you are not planning to use these tiles with Mapbox GL,
-        You will probably also want to specify `-d8` for normal 256x256 web map tile resolution.
+        you will probably also want to specify `-d8` for normal 256x256 web map tile resolution.
 * `-c` *rrggbb*: Specify the color to use in raster tiles as a hex color.
 * `-w`: Make tiles for a white background instead of a black background.
+
+### Miscellaneous controls
+
+* `-p` *cpus*: Use the specified number of parallel tasks.
+* `-q`: Silence the progress indicator
 
 Internal file format
 --------------------
