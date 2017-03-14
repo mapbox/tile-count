@@ -37,7 +37,7 @@ bool include_density = false;
 bool include_count = false;
 
 void usage(char **argv) {
-	fprintf(stderr, "Usage: %s [options] -z zoom -o out.mbtiles file.count\n", argv[0]);
+	fprintf(stderr, "Usage: %s [options] -o out.mbtiles file.count\n", argv[0]);
 }
 
 struct tile {
@@ -70,6 +70,7 @@ struct tiler {
 	long long atmid;
 
 	unsigned char *map;
+	size_t minzoom;
 	size_t zooms;
 	size_t detail;
 	sqlite3 *outdb;
@@ -392,7 +393,7 @@ void *run_tile(void *p) {
 			t->bbox[3] = wy;
 		}
 
-		for (size_t z = 0; z < t->zooms; z++) {
+		for (size_t z = t->minzoom; z < t->zooms; z++) {
 			unsigned tx = wx, ty = wy;
 			if (z + t->detail != 32) {
 				tx >>= (32 - (z + t->detail));
@@ -449,7 +450,7 @@ void *run_tile(void *p) {
 		}
 	}
 
-	for (size_t z = 0; z < t->zooms; z++) {
+	for (size_t z = t->minzoom; z < t->zooms; z++) {
 		if (t->tiles[z].active) {
 			unsigned long long first_for_tile, last_for_tile;
 			calc_tile_edges(z, t->tiles[z].x, t->tiles[z].y, first_for_tile, last_for_tile);
@@ -471,8 +472,8 @@ void *run_tile(void *p) {
 	return NULL;
 }
 
-void regress(std::vector<long long> &max) {
-	for (size_t i = 0; i < max.size(); i++) {
+void regress(std::vector<long long> &max, size_t minzoom) {
+	for (size_t i = minzoom; i < max.size(); i++) {
 		if (max[i] == 0) {
 			max[i] = 1;
 		}
@@ -483,8 +484,9 @@ void regress(std::vector<long long> &max) {
 	double sum_x2 = 0;
 	double sum_y2 = 0;
 	double sum_xy = 0;
+	size_t n = 0;
 
-	for (size_t i = 0; i < max.size(); i++) {
+	for (size_t i = minzoom; i < max.size(); i++) {
 		double x = i;
 		double y = log(max[i]);
 
@@ -493,12 +495,14 @@ void regress(std::vector<long long> &max) {
 		sum_xy += x * y;
 		sum_x2 += x * x;
 		sum_y2 += y * y;
+
+		n++;
 	}
 
-	double m = (max.size() * sum_xy - sum_x * sum_y) / (max.size() * sum_x2 - (sum_x * sum_x));
-	double b = (sum_y * sum_x2 - sum_x * sum_xy) / (max.size() * sum_x2 - (sum_x * sum_x));
+	double m = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - (sum_x * sum_x));
+	double b = (sum_y * sum_x2 - sum_x * sum_xy) / (n * sum_x2 - (sum_x * sum_x));
 
-	for (size_t i = 0; i < max.size(); i++) {
+	for (size_t i = minzoom; i < max.size(); i++) {
 		max[i] = exp(m * i + b);
 		if (max[i] < 1) {
 			max[i] = 1;
@@ -940,21 +944,31 @@ int main(int argc, char **argv) {
 	extern char *optarg;
 
 	char *outfile = NULL;
-	int zoom = -1;
+	int minzoom = 0;
+	int maxzoom = -1;
+	int bin = -1;
 	bool force = false;
 	size_t detail = 9;
 	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:p:d:l:m:g:bwc:qn:y:")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:g:bwc:qn:y:")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
 			break;
 
 		case 'z':
-			zoom = atoi(optarg);
+			maxzoom = atoi(optarg);
+			break;
+
+		case 'Z':
+			minzoom = atoi(optarg);
+			break;
+
+		case 's':
+			bin = atoi(optarg);
 			break;
 
 		case 'p':
@@ -1067,16 +1081,25 @@ int main(int argc, char **argv) {
 	}
 
 	if (zooms == 0) {
-		if (optind + 1 != argc || zoom < 0 || outfile == NULL) {
+		if (optind + 1 != argc || (maxzoom < 0 && bin < 0) || outfile == NULL) {
 			usage(argv);
 		}
 
-		if (zoom < (signed) (detail + 1)) {
-			fprintf(stderr, "%s: Detail (%zu) too low for zoom (%d)\n", argv[0], detail, zoom);
+		if (maxzoom < 0 && bin < 0) {
+			fprintf(stderr, "%s: Must specify either maxzoom (-z) or bin size (-s)\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 
-		zooms = zoom - detail + 1;
+		if (maxzoom >= 0) {
+			zooms = maxzoom + 1;
+		} else {
+			if (bin < (signed) (detail + 1)) {
+				fprintf(stderr, "%s: Detail (%zu) too low for bin size (%d)\n", argv[0], detail, bin);
+				exit(EXIT_FAILURE);
+			}
+
+			zooms = bin - detail + 1;
+		}
 
 		struct stat st;
 		if (stat(argv[optind], &st) != 0) {
@@ -1115,6 +1138,7 @@ int main(int argc, char **argv) {
 				tilers[j].bbox[2] = tilers[j].bbox[3] = 0;
 				tilers[j].midx = tilers[j].midy = 0;
 				tilers[j].zooms = zooms;
+				tilers[j].minzoom = minzoom;
 				tilers[j].detail = detail;
 				tilers[j].outdb = outdb;
 				tilers[j].progress = progress;
@@ -1204,7 +1228,7 @@ int main(int argc, char **argv) {
 					zoom_max.push_back(max);
 				}
 
-				regress(zoom_max);
+				regress(zoom_max, minzoom);
 			} else {
 				long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
 				for (size_t j = 0; j < cpus; j++) {

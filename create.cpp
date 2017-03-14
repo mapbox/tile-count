@@ -218,9 +218,9 @@ int main(int argc, char **argv) {
 	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:p:q")) != -1) {
+	while ((i = getopt(argc, argv, "fs:o:p:q")) != -1) {
 		switch (i) {
-		case 'z':
+		case 's':
 			zoom = atoi(optarg);
 			break;
 
