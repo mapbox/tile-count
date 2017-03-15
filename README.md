@@ -63,8 +63,7 @@ with the same minzoom, maxzoom, and detail. The merged output can be either
 bitmap or vector as desired. The `.mbtiles` files being merged should be separated
 spatially, not temporally, because merging does not recalculate the reference
 brightness where tilesets overlap. Use `tile-count-merge` to combine data sets
-that are for the same area. If the tilesets being merged contain vector tiles,
-their features must contain the `density` attribute.
+that are for the same area.
 
 ### Output tileset
 

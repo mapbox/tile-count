@@ -730,6 +730,7 @@ void *retile(void *v) {
 				for (size_t f = 0; f < layer.features.size(); f++) {
 					mvt_feature &feat = layer.features[f];
 					double density = -1;
+					long long count = -1;
 
 					for (size_t tag = 0; tag + 1 < feat.tags.size(); tag += 2) {
 						if (feat.tags[tag] >= layer.keys.size()) {
@@ -749,14 +750,22 @@ void *retile(void *v) {
 								density = val.numeric_value.uint_value + .5;
 							}
 						}
+						if (key == std::string("count")) {
+							if (val.type == mvt_uint) {
+								count = val.numeric_value.uint_value + 1;
+							}
+						}
 					}
 
-					if (density < 0) {
-						fprintf(stderr, "Can't find density attribute in feature being merged\n");
+					if (density < 0 && count < 0) {
+						fprintf(stderr, "Can't find density or count attribute in feature being merged\n");
 						exit(EXIT_FAILURE);
 					}
 
-					double count = exp(log(density) * gamma) * zoom_max / exp(log(density_levels) * gamma);
+					if (count < 0) {
+						count = exp(log(density) * gamma) * zoom_max / exp(log(density_levels) * gamma);
+					}
+
 					for (size_t g = 0; g < feat.geometry.size(); g++) {
 						// XXX This thinks it knows that the moveto is always the top left of the pixel
 
