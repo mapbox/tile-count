@@ -656,7 +656,7 @@ void *retile(void *v) {
 				exit(EXIT_FAILURE);
 			}
 
-			if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y()) {
+			if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y() || t.count.size() != width * height) {
 				if (t.active) {
 					make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername);
 				}
@@ -705,7 +705,27 @@ void *retile(void *v) {
 
 			for (size_t l = 0; l < tile.layers.size(); l++) {
 				mvt_layer &layer = tile.layers[l];
-				int extent = layer.extent;
+				size_t extent = layer.extent;
+
+				double gamma = (*queue)[i]->density_gamma;
+				long long zoom_max = (*queue)[i]->max_density[(*queue)[i]->zoom];
+				size_t density_levels = (*queue)[i]->density_levels;
+
+				if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y() || t.count.size() != extent * extent) {
+					if (t.active) {
+						make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername);
+					}
+
+					t.active = true;
+					t.z = (*queue)[i]->zoom;
+					t.x = (*queue)[i]->x;
+					t.y = (*queue)[i]->y();
+					t.count.resize(extent * extent);
+
+					for (size_t j = 0; j < extent * extent; j++) {
+						t.count[j] = 0;
+					}
+				}
 
 				for (size_t f = 0; f < layer.features.size(); f++) {
 					mvt_feature &feat = layer.features[f];
@@ -725,6 +745,28 @@ void *retile(void *v) {
 						mvt_value const &val = layer.values[feat.tags[tag + 1]];
 
 						if (key == std::string("density")) {
+							if (val.type == mvt_uint) {
+								density = val.numeric_value.uint_value;
+							}
+						}
+					}
+
+					if (density < 0) {
+						fprintf(stderr, "Can't find density attribute in feature being merged\n");
+						exit(EXIT_FAILURE);
+					}
+
+					double count = exp(log(density) * gamma) * zoom_max / exp(log(density_levels) * gamma);
+					for (size_t g = 0; g < feat.geometry.size(); g++) {
+						// XXX This thinks it knows that the moveto is always the top left of the pixel
+
+						if (feat.geometry[g].op == mvt_moveto) {
+							if (feat.geometry[g].x >= 0 &&
+							    feat.geometry[g].y >= 0 &&
+							    feat.geometry[g].x < (ssize_t) extent &&
+							    feat.geometry[g].y < (ssize_t) extent) {
+								t.count[extent * feat.geometry[g].y + feat.geometry[g].x] += count;
+							}
 						}
 					}
 				}
