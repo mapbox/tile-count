@@ -682,7 +682,7 @@ void *retile(void *v) {
 
 				for (size_t x = 0; x < width; x++) {
 					if (bytes[x] > 0) {
-						double bright = bytes[x];
+						double bright = bytes[x] + .5;
 						double count = exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma);
 						t.count[width * y + x] += count;
 					}
@@ -729,7 +729,7 @@ void *retile(void *v) {
 
 				for (size_t f = 0; f < layer.features.size(); f++) {
 					mvt_feature &feat = layer.features[f];
-					ssize_t density = -1;
+					double density = -1;
 
 					for (size_t tag = 0; tag + 1 < feat.tags.size(); tag += 2) {
 						if (feat.tags[tag] >= layer.keys.size()) {
@@ -746,7 +746,7 @@ void *retile(void *v) {
 
 						if (key == std::string("density")) {
 							if (val.type == mvt_uint) {
-								density = val.numeric_value.uint_value;
+								density = val.numeric_value.uint_value + .5;
 							}
 						}
 					}
