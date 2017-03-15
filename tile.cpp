@@ -18,6 +18,9 @@
 #include <time.h>
 #include <png.h>
 #include "tippecanoe/projection.hpp"
+#include "protozero/varint.hpp"
+#include "protozero/pbf_reader.hpp"
+#include "protozero/pbf_writer.hpp"
 #include "header.hpp"
 #include "serial.hpp"
 #include "kll.hpp"
@@ -250,7 +253,7 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 		mvt_layer layer;
 		layer.name = layername;
 		layer.version = 2;
-		layer.extent = 4096;
+		layer.extent = 1U << detail;
 
 		std::vector<mvt_feature> features;
 		features.resize(levels);
@@ -262,11 +265,11 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 					mvt_feature &feature = features[count];
 					feature.type = mvt_polygon;
 
-					feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 0) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 1) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 1) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 0) << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
 				}
 			}
 		}
@@ -547,6 +550,7 @@ struct tile_reader {
 	sqlite3 *outdb = NULL;
 	std::string name;
 	std::string layername;
+	std::string format;
 
 	int zoom = 0;
 	int x = 0;
@@ -616,75 +620,116 @@ void *retile(void *v) {
 	tile t(0, 0);
 
 	for (size_t i = 0; i < queue->size(); i++) {
-		png_structp png_ptr;
-		png_infop info_ptr;
+		if ((*queue)[i]->format == std::string("png")) {
+			png_structp png_ptr;
+			png_infop info_ptr;
 
-		struct read_state state;
-		state.base = (*queue)[i]->data.c_str();
-		state.off = 0;
-		state.len = (*queue)[i]->data.length();
+			struct read_state state;
+			state.base = (*queue)[i]->data.c_str();
+			state.off = 0;
+			state.len = (*queue)[i]->data.length();
 
-		png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
-		if (png_ptr == NULL) {
-			fprintf(stderr, "PNG init failed\n");
-			exit(EXIT_FAILURE);
-		}
-
-		info_ptr = png_create_info_struct(png_ptr);
-		if (info_ptr == NULL) {
-			fprintf(stderr, "PNG init failed\n");
-			exit(EXIT_FAILURE);
-		}
-
-		png_set_read_fn(png_ptr, &state, user_read_data);
-		png_set_sig_bytes(png_ptr, 0);
-
-		png_read_png(png_ptr, info_ptr, 0, NULL);
-
-		png_uint_32 width, height;
-		int bit_depth;
-		int color_type, interlace_type;
-
-		png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, &interlace_type, NULL, NULL);
-		if (bit_depth != 8 || color_type != PNG_COLOR_TYPE_PALETTE || width != height) {
-			fprintf(stderr, "Misencoded PNG\n");
-			exit(EXIT_FAILURE);
-		}
-
-		if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y()) {
-			if (t.active) {
-				make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername);
+			png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
+			if (png_ptr == NULL) {
+				fprintf(stderr, "PNG init failed\n");
+				exit(EXIT_FAILURE);
 			}
 
-			t.active = true;
-			t.z = (*queue)[i]->zoom;
-			t.x = (*queue)[i]->x;
-			t.y = (*queue)[i]->y();
-			t.count.resize(width * height);
-
-			for (size_t j = 0; j < width * height; j++) {
-				t.count[j] = 0;
+			info_ptr = png_create_info_struct(png_ptr);
+			if (info_ptr == NULL) {
+				fprintf(stderr, "PNG init failed\n");
+				exit(EXIT_FAILURE);
 			}
-		}
 
-		double gamma = (*queue)[i]->density_gamma;
-		long long zoom_max = (*queue)[i]->max_density[(*queue)[i]->zoom];
-		size_t density_levels = (*queue)[i]->density_levels;
+			png_set_read_fn(png_ptr, &state, user_read_data);
+			png_set_sig_bytes(png_ptr, 0);
 
-		png_bytepp row_pointers = png_get_rows(png_ptr, info_ptr);
-		for (size_t y = 0; y < height; y++) {
-			unsigned char *bytes = row_pointers[y];
+			png_read_png(png_ptr, info_ptr, 0, NULL);
 
-			for (size_t x = 0; x < width; x++) {
-				if (bytes[x] > 0) {
-					double bright = bytes[x];
-					double count = exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma);
-					t.count[width * y + x] += count;
+			png_uint_32 width, height;
+			int bit_depth;
+			int color_type, interlace_type;
+
+			png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, &interlace_type, NULL, NULL);
+			if (bit_depth != 8 || color_type != PNG_COLOR_TYPE_PALETTE || width != height) {
+				fprintf(stderr, "Misencoded PNG\n");
+				exit(EXIT_FAILURE);
+			}
+
+			if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y()) {
+				if (t.active) {
+					make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername);
+				}
+
+				t.active = true;
+				t.z = (*queue)[i]->zoom;
+				t.x = (*queue)[i]->x;
+				t.y = (*queue)[i]->y();
+				t.count.resize(width * height);
+
+				for (size_t j = 0; j < width * height; j++) {
+					t.count[j] = 0;
+				}
+			}
+
+			double gamma = (*queue)[i]->density_gamma;
+			long long zoom_max = (*queue)[i]->max_density[(*queue)[i]->zoom];
+			size_t density_levels = (*queue)[i]->density_levels;
+
+			png_bytepp row_pointers = png_get_rows(png_ptr, info_ptr);
+			for (size_t y = 0; y < height; y++) {
+				unsigned char *bytes = row_pointers[y];
+
+				for (size_t x = 0; x < width; x++) {
+					if (bytes[x] > 0) {
+						double bright = bytes[x];
+						double count = exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma);
+						t.count[width * y + x] += count;
+					}
+				}
+			}
+
+			png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+		} else {
+			mvt_tile tile;
+
+			try {
+				if (!tile.decode((*queue)[i]->data)) {
+					fprintf(stderr, "Couldn't parse tile\n");
+					exit(EXIT_FAILURE);
+				}
+			} catch (protozero::unknown_pbf_wire_type_exception e) {
+				fprintf(stderr, "PBF decoding error in tile\n");
+				exit(EXIT_FAILURE);
+			}
+
+			for (size_t l = 0; l < tile.layers.size(); l++) {
+				mvt_layer &layer = tile.layers[l];
+				int extent = layer.extent;
+
+				for (size_t f = 0; f < layer.features.size(); f++) {
+					mvt_feature &feat = layer.features[f];
+					ssize_t density = -1;
+
+					for (size_t tag = 0; tag + 1 < feat.tags.size(); tag += 2) {
+						if (feat.tags[tag] >= layer.keys.size()) {
+							fprintf(stderr, "Error: out of bounds feature key\n");
+							exit(EXIT_FAILURE);
+						}
+						if (feat.tags[tag + 1] >= layer.values.size()) {
+							fprintf(stderr, "Error: out of bounds feature value\n");
+							exit(EXIT_FAILURE);
+						}
+
+						std::string key = layer.keys[feat.tags[tag]];
+						mvt_value const &val = layer.values[feat.tags[tag + 1]];
+
+						if (key == std::string("density")) {
+						}
+					}
 				}
 			}
 		}
-
-		png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 	}
 
 	if (t.active) {
@@ -797,6 +842,16 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 					fprintf(stderr, "%s: Mismatched number of zoom levels (%d)\n", fnames[i], sqlite3_column_int(stmt, 0) + 1);
 					exit(EXIT_FAILURE);
 				}
+			}
+			sqlite3_finalize(stmt);
+		}
+
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'format';", -1, &stmt, NULL) == SQLITE_OK) {
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				r.format = (const char *) sqlite3_column_text(stmt, 0);
+			} else {
+				fprintf(stderr, "%s: No format value in metadata\n", fnames[i]);
+				exit(EXIT_FAILURE);
 			}
 			sqlite3_finalize(stmt);
 		}

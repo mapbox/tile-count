@@ -59,11 +59,12 @@ indicating how many original points were accumulated into that binned point,
 normalized according the densest point in the zoom level.
 
 If you are merging existing `.mbtiles` files, they all have to have been created
-with the same minzoom, maxzoom, and detail, and with `-b`. The merged output can be either
+with the same minzoom, maxzoom, and detail. The merged output can be either
 bitmap or vector as desired. The `.mbtiles` files being merged should be separated
 spatially, not temporally, because merging does not recalculate the reference
 brightness where tilesets overlap. Use `tile-count-merge` to combine data sets
-that are for the same area.
+that are for the same area. If the tilesets being merged contain vector tiles,
+their features must contain the `density` attribute.
 
 ### Output tileset
 
