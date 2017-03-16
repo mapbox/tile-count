@@ -1,7 +1,3 @@
-#define VT_STRING 1
-#define VT_NUMBER 2
-#define VT_BOOLEAN 7
-
 struct type_and_string {
 	int type;
 	std::string string;

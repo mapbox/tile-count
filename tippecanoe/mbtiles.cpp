@@ -11,6 +11,7 @@
 #include <string>
 #include <set>
 #include <map>
+#include "mvt.hpp"
 #include "mbtiles.hpp"
 
 sqlite3 *mbtiles_open(char *dbname, char **argv, int forcetable) {
@@ -256,9 +257,13 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *fname, int minzoom, int 
 				aprintf(&buf, "\"");
 				quote(&buf, j->string.c_str());
 
-				if (j->type == VT_NUMBER) {
+				if (j->type == mvt_double ||
+				    j->type == mvt_float ||
+				    j->type == mvt_double ||
+				    j->type == mvt_uint ||
+				    j->type == mvt_sint) {
 					aprintf(&buf, "\": \"Number\"");
-				} else if (j->type == VT_BOOLEAN) {
+				} else if (j->type == mvt_bool) {
 					aprintf(&buf, "\": \"Boolean\"");
 				} else {
 					aprintf(&buf, "\": \"String\"");

@@ -1373,14 +1373,14 @@ int main(int argc, char **argv) {
 
 	if (include_count) {
 		type_and_string tas;
-		tas.type = VT_NUMBER;
+		tas.type = mvt_double;
 		tas.string = "count";
 		lme.file_keys.insert(tas);
 	}
 
 	if (include_density) {
 		type_and_string tas2;
-		tas2.type = VT_NUMBER;
+		tas2.type = mvt_double;
 		tas2.string = "density";
 		lme.file_keys.insert(tas2);
 	}

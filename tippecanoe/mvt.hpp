@@ -14,17 +14,17 @@ struct mvt_geometry {
 
 	mvt_geometry(int op, long long x, long long y);
 
-        bool operator<(mvt_geometry const &s) const {
-                if (y < s.y || (y == s.y && x < s.x)) {
-                        return true;
-                } else {
-                        return false;
-                }
-        }
+	bool operator<(mvt_geometry const &s) const {
+		if (y < s.y || (y == s.y && x < s.x)) {
+			return true;
+		} else {
+			return false;
+		}
+	}
 
-        bool operator==(mvt_geometry const &s) const {
-                return y == s.y && x == s.x;
-        }
+	bool operator==(mvt_geometry const &s) const {
+		return y == s.y && x == s.x;
+	}
 };
 
 enum mvt_geometry_type {
