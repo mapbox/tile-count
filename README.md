@@ -96,6 +96,10 @@ instead of merging existing tilesets. The `bin size` plus the `detail` always eq
 * `-c` *rrggbb*: Specify the color to use in raster tiles as a hex color.
 * `-w`: Make tiles for a white background instead of a black background.
 
+### Vector tiles
+
+* `-1`: Output an individual polygon for each bin instead of combining them into MultiPolygons.
+
 ### Miscellaneous controls
 
 * `-p` *cpus*: Use the specified number of parallel tasks.

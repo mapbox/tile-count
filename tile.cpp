@@ -35,6 +35,8 @@ bool bitmap = false;
 int color = 0x888888;
 int white = 0;
 
+bool single_polygons = false;
+
 bool quiet = false;
 bool include_density = false;
 bool include_count = false;
@@ -258,43 +260,79 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 		std::vector<mvt_feature> features;
 		features.resize(levels);
 
-		for (size_t y = 0; y < (1U << detail); y++) {
-			for (size_t x = 0; x < (1U << detail); x++) {
-				long long count = tile.count[y * (1 << detail) + x];
-				if (count != 0) {
-					mvt_feature &feature = features[count];
-					feature.type = mvt_polygon;
+		if (single_polygons) {
+			for (size_t y = 0; y < (1U << detail); y++) {
+				for (size_t x = 0; x < (1U << detail); x++) {
+					long long density = tile.count[y * (1 << detail) + x];
+					if (density != 0) {
+						mvt_feature feature;
+						feature.type = mvt_polygon;
 
-					feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+						feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
+						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
+						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
+						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
+						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+
+						if (include_density) {
+							mvt_value val;
+							val.type = mvt_uint;
+							val.numeric_value.uint_value = density;
+							layer.tag(feature, "density", val);
+						}
+
+						if (include_count) {
+							double count = exp(log(density) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
+
+							mvt_value val;
+							val.type = mvt_uint;
+							val.numeric_value.uint_value = count;
+							layer.tag(feature, "count", val);
+						}
+
+						layer.features.push_back(feature);
+					}
 				}
 			}
-		}
+		} else {
+			for (size_t y = 0; y < (1U << detail); y++) {
+				for (size_t x = 0; x < (1U << detail); x++) {
+					long long count = tile.count[y * (1 << detail) + x];
+					if (count != 0) {
+						mvt_feature &feature = features[count];
+						feature.type = mvt_polygon;
 
-		for (size_t i = first_level; i < features.size(); i++) {
-			if (features[i].geometry.size() != 0) {
-				// features[i].geometry = merge_rings(features[i].geometry);
-
-				if (include_density) {
-					mvt_value val;
-					val.type = mvt_uint;
-					val.numeric_value.uint_value = i;
-					layer.tag(features[i], "density", val);
+						feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
+						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
+						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
+						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
+						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+					}
 				}
+			}
 
-				if (include_count) {
-					double count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
+			for (size_t i = first_level; i < features.size(); i++) {
+				if (features[i].geometry.size() != 0) {
+					// features[i].geometry = merge_rings(features[i].geometry);
 
-					mvt_value val;
-					val.type = mvt_uint;
-					val.numeric_value.uint_value = count;
-					layer.tag(features[i], "count", val);
+					if (include_density) {
+						mvt_value val;
+						val.type = mvt_uint;
+						val.numeric_value.uint_value = i;
+						layer.tag(features[i], "density", val);
+					}
+
+					if (include_count) {
+						double count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
+
+						mvt_value val;
+						val.type = mvt_uint;
+						val.numeric_value.uint_value = count;
+						layer.tag(features[i], "count", val);
+					}
+
+					layer.features.push_back(features[i]);
 				}
-
-				layer.features.push_back(features[i]);
 			}
 		}
 
@@ -1059,7 +1097,7 @@ int main(int argc, char **argv) {
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:g:bwc:qn:y:")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:g:bwc:qn:y:1")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -1135,6 +1173,10 @@ int main(int argc, char **argv) {
 
 		case 'o':
 			outfile = optarg;
+			break;
+
+		case '1':
+			single_polygons = true;
 			break;
 
 		default:
