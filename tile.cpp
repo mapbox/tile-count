@@ -18,6 +18,9 @@
 #include <time.h>
 #include <png.h>
 #include "tippecanoe/projection.hpp"
+#include "protozero/varint.hpp"
+#include "protozero/pbf_reader.hpp"
+#include "protozero/pbf_writer.hpp"
 #include "header.hpp"
 #include "serial.hpp"
 #include "kll.hpp"
@@ -33,9 +36,11 @@ int color = 0x888888;
 int white = 0;
 
 bool quiet = false;
+bool include_density = false;
+bool include_count = false;
 
 void usage(char **argv) {
-	fprintf(stderr, "Usage: %s [options] -z zoom -o out.mbtiles file.count\n", argv[0]);
+	fprintf(stderr, "Usage: %s [options] -o out.mbtiles file.count\n", argv[0]);
 }
 
 struct tile {
@@ -68,6 +73,7 @@ struct tiler {
 	long long atmid;
 
 	unsigned char *map;
+	size_t minzoom;
 	size_t zooms;
 	size_t detail;
 	sqlite3 *outdb;
@@ -76,6 +82,7 @@ struct tiler {
 	volatile int *progress;
 	size_t shard;
 	size_t cpus;
+	std::string layername;
 };
 
 std::vector<mvt_geometry> merge_rings(std::vector<mvt_geometry> g) {
@@ -160,7 +167,7 @@ static void fail(png_structp png_ptr, png_const_charp error_msg) {
 	exit(EXIT_FAILURE);
 }
 
-void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max) {
+void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max, std::string const &layername) {
 	bool anything = false;
 	std::string compressed;
 
@@ -244,9 +251,9 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 		}
 	} else {
 		mvt_layer layer;
-		layer.name = "count";
+		layer.name = layername;
 		layer.version = 2;
-		layer.extent = 4096;
+		layer.extent = 1U << detail;
 
 		std::vector<mvt_feature> features;
 		features.resize(levels);
@@ -258,11 +265,11 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 					mvt_feature &feature = features[count];
 					feature.type = mvt_polygon;
 
-					feature.geometry.push_back(mvt_geometry(mvt_moveto, x << (12 - detail), y << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 0) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1) << (12 - detail), (y + 1) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 1) << (12 - detail)));
-					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0) << (12 - detail), (y + 0) << (12 - detail)));
+					feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
+					feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
 				}
 			}
 		}
@@ -271,21 +278,21 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			if (features[i].geometry.size() != 0) {
 				// features[i].geometry = merge_rings(features[i].geometry);
 
-				{
+				if (include_density) {
 					mvt_value val;
 					val.type = mvt_uint;
 					val.numeric_value.uint_value = i;
 					layer.tag(features[i], "density", val);
 				}
 
-#if 0
-			{
-				mvt_value val;
-				val.type = mvt_uint;
-				val.numeric_value.uint_value = largest[i];
-				layer.tag(features[i], "count", val);
-			}
-#endif
+				if (include_count) {
+					double count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
+
+					mvt_value val;
+					val.type = mvt_uint;
+					val.numeric_value.uint_value = count;
+					layer.tag(features[i], "count", val);
+				}
 
 				layer.features.push_back(features[i]);
 			}
@@ -389,7 +396,7 @@ void *run_tile(void *p) {
 			t->bbox[3] = wy;
 		}
 
-		for (size_t z = 0; z < t->zooms; z++) {
+		for (size_t z = t->minzoom; z < t->zooms; z++) {
 			unsigned tx = wx, ty = wy;
 			if (z + t->detail != 32) {
 				tx >>= (32 - (z + t->detail));
@@ -419,7 +426,7 @@ void *run_tile(void *p) {
 						if (t->pass == 0) {
 							gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 						} else {
-							make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z]);
+							make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z], t->layername);
 						}
 					} else {
 						t->partial_tiles.push_back(t->tiles[z]);
@@ -446,7 +453,7 @@ void *run_tile(void *p) {
 		}
 	}
 
-	for (size_t z = 0; z < t->zooms; z++) {
+	for (size_t z = t->minzoom; z < t->zooms; z++) {
 		if (t->tiles[z].active) {
 			unsigned long long first_for_tile, last_for_tile;
 			calc_tile_edges(z, t->tiles[z].x, t->tiles[z].y, first_for_tile, last_for_tile);
@@ -457,7 +464,7 @@ void *run_tile(void *p) {
 				if (t->pass == 0) {
 					gather_quantile(t->quantiles[z], t->tiles[z], t->detail, t->max[z]);
 				} else {
-					make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z]);
+					make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z], t->layername);
 				}
 			} else {
 				t->partial_tiles.push_back(t->tiles[z]);
@@ -468,8 +475,8 @@ void *run_tile(void *p) {
 	return NULL;
 }
 
-void regress(std::vector<long long> &max) {
-	for (size_t i = 0; i < max.size(); i++) {
+void regress(std::vector<long long> &max, size_t minzoom) {
+	for (size_t i = minzoom; i < max.size(); i++) {
 		if (max[i] == 0) {
 			max[i] = 1;
 		}
@@ -480,8 +487,9 @@ void regress(std::vector<long long> &max) {
 	double sum_x2 = 0;
 	double sum_y2 = 0;
 	double sum_xy = 0;
+	size_t n = 0;
 
-	for (size_t i = 0; i < max.size(); i++) {
+	for (size_t i = minzoom; i < max.size(); i++) {
 		double x = i;
 		double y = log(max[i]);
 
@@ -490,12 +498,14 @@ void regress(std::vector<long long> &max) {
 		sum_xy += x * y;
 		sum_x2 += x * x;
 		sum_y2 += y * y;
+
+		n++;
 	}
 
-	double m = (max.size() * sum_xy - sum_x * sum_y) / (max.size() * sum_x2 - (sum_x * sum_x));
-	double b = (sum_y * sum_x2 - sum_x * sum_xy) / (max.size() * sum_x2 - (sum_x * sum_x));
+	double m = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - (sum_x * sum_x));
+	double b = (sum_y * sum_x2 - sum_x * sum_xy) / (n * sum_x2 - (sum_x * sum_x));
 
-	for (size_t i = 0; i < max.size(); i++) {
+	for (size_t i = minzoom; i < max.size(); i++) {
 		max[i] = exp(m * i + b);
 		if (max[i] < 1) {
 			max[i] = 1;
@@ -539,6 +549,8 @@ struct tile_reader {
 	sqlite3_stmt *stmt = NULL;
 	sqlite3 *outdb = NULL;
 	std::string name;
+	std::string layername;
+	std::string format;
 
 	int zoom = 0;
 	int x = 0;
@@ -608,79 +620,171 @@ void *retile(void *v) {
 	tile t(0, 0);
 
 	for (size_t i = 0; i < queue->size(); i++) {
-		png_structp png_ptr;
-		png_infop info_ptr;
+		if ((*queue)[i]->format == std::string("png")) {
+			png_structp png_ptr;
+			png_infop info_ptr;
 
-		struct read_state state;
-		state.base = (*queue)[i]->data.c_str();
-		state.off = 0;
-		state.len = (*queue)[i]->data.length();
+			struct read_state state;
+			state.base = (*queue)[i]->data.c_str();
+			state.off = 0;
+			state.len = (*queue)[i]->data.length();
 
-		png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
-		if (png_ptr == NULL) {
-			fprintf(stderr, "PNG init failed\n");
-			exit(EXIT_FAILURE);
-		}
-
-		info_ptr = png_create_info_struct(png_ptr);
-		if (info_ptr == NULL) {
-			fprintf(stderr, "PNG init failed\n");
-			exit(EXIT_FAILURE);
-		}
-
-		png_set_read_fn(png_ptr, &state, user_read_data);
-		png_set_sig_bytes(png_ptr, 0);
-
-		png_read_png(png_ptr, info_ptr, 0, NULL);
-
-		png_uint_32 width, height;
-		int bit_depth;
-		int color_type, interlace_type;
-
-		png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, &interlace_type, NULL, NULL);
-		if (bit_depth != 8 || color_type != PNG_COLOR_TYPE_PALETTE || width != height) {
-			fprintf(stderr, "Misencoded PNG\n");
-			exit(EXIT_FAILURE);
-		}
-
-		if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y()) {
-			if (t.active) {
-				make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z]);
+			png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
+			if (png_ptr == NULL) {
+				fprintf(stderr, "PNG init failed\n");
+				exit(EXIT_FAILURE);
 			}
 
-			t.active = true;
-			t.z = (*queue)[i]->zoom;
-			t.x = (*queue)[i]->x;
-			t.y = (*queue)[i]->y();
-			t.count.resize(width * height);
-
-			for (size_t j = 0; j < width * height; j++) {
-				t.count[j] = 0;
+			info_ptr = png_create_info_struct(png_ptr);
+			if (info_ptr == NULL) {
+				fprintf(stderr, "PNG init failed\n");
+				exit(EXIT_FAILURE);
 			}
-		}
 
-		double gamma = (*queue)[i]->density_gamma;
-		long long zoom_max = (*queue)[i]->max_density[(*queue)[i]->zoom];
-		size_t density_levels = (*queue)[i]->density_levels;
+			png_set_read_fn(png_ptr, &state, user_read_data);
+			png_set_sig_bytes(png_ptr, 0);
 
-		png_bytepp row_pointers = png_get_rows(png_ptr, info_ptr);
-		for (size_t y = 0; y < height; y++) {
-			unsigned char *bytes = row_pointers[y];
+			png_read_png(png_ptr, info_ptr, 0, NULL);
 
-			for (size_t x = 0; x < width; x++) {
-				if (bytes[x] > 0) {
-					double bright = bytes[x];
-					double count = exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma);
-					t.count[width * y + x] += count;
+			png_uint_32 width, height;
+			int bit_depth;
+			int color_type, interlace_type;
+
+			png_get_IHDR(png_ptr, info_ptr, &width, &height, &bit_depth, &color_type, &interlace_type, NULL, NULL);
+			if (bit_depth != 8 || color_type != PNG_COLOR_TYPE_PALETTE || width != height) {
+				fprintf(stderr, "Misencoded PNG\n");
+				exit(EXIT_FAILURE);
+			}
+
+			if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y() || t.count.size() != width * height) {
+				if (t.active) {
+					make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername);
+				}
+
+				t.active = true;
+				t.z = (*queue)[i]->zoom;
+				t.x = (*queue)[i]->x;
+				t.y = (*queue)[i]->y();
+				t.count.resize(width * height);
+
+				for (size_t j = 0; j < width * height; j++) {
+					t.count[j] = 0;
+				}
+			}
+
+			double gamma = (*queue)[i]->density_gamma;
+			long long zoom_max = (*queue)[i]->max_density[(*queue)[i]->zoom];
+			size_t density_levels = (*queue)[i]->density_levels;
+
+			png_bytepp row_pointers = png_get_rows(png_ptr, info_ptr);
+			for (size_t y = 0; y < height; y++) {
+				unsigned char *bytes = row_pointers[y];
+
+				for (size_t x = 0; x < width; x++) {
+					if (bytes[x] > 0) {
+						double bright = bytes[x] + .5;
+						double count = exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma);
+						t.count[width * y + x] += count;
+					}
+				}
+			}
+
+			png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+		} else {
+			mvt_tile tile;
+
+			try {
+				if (!tile.decode((*queue)[i]->data)) {
+					fprintf(stderr, "Couldn't parse tile\n");
+					exit(EXIT_FAILURE);
+				}
+			} catch (protozero::unknown_pbf_wire_type_exception e) {
+				fprintf(stderr, "PBF decoding error in tile\n");
+				exit(EXIT_FAILURE);
+			}
+
+			for (size_t l = 0; l < tile.layers.size(); l++) {
+				mvt_layer &layer = tile.layers[l];
+				size_t extent = layer.extent;
+
+				double gamma = (*queue)[i]->density_gamma;
+				long long zoom_max = (*queue)[i]->max_density[(*queue)[i]->zoom];
+				size_t density_levels = (*queue)[i]->density_levels;
+
+				if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y() || t.count.size() != extent * extent) {
+					if (t.active) {
+						make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername);
+					}
+
+					t.active = true;
+					t.z = (*queue)[i]->zoom;
+					t.x = (*queue)[i]->x;
+					t.y = (*queue)[i]->y();
+					t.count.resize(extent * extent);
+
+					for (size_t j = 0; j < extent * extent; j++) {
+						t.count[j] = 0;
+					}
+				}
+
+				for (size_t f = 0; f < layer.features.size(); f++) {
+					mvt_feature &feat = layer.features[f];
+					double density = -1;
+					long long count = -1;
+
+					for (size_t tag = 0; tag + 1 < feat.tags.size(); tag += 2) {
+						if (feat.tags[tag] >= layer.keys.size()) {
+							fprintf(stderr, "Error: out of bounds feature key\n");
+							exit(EXIT_FAILURE);
+						}
+						if (feat.tags[tag + 1] >= layer.values.size()) {
+							fprintf(stderr, "Error: out of bounds feature value\n");
+							exit(EXIT_FAILURE);
+						}
+
+						std::string key = layer.keys[feat.tags[tag]];
+						mvt_value const &val = layer.values[feat.tags[tag + 1]];
+
+						if (key == std::string("density")) {
+							if (val.type == mvt_uint) {
+								density = val.numeric_value.uint_value + .5;
+							}
+						}
+						if (key == std::string("count")) {
+							if (val.type == mvt_uint) {
+								count = val.numeric_value.uint_value + 1;
+							}
+						}
+					}
+
+					if (density < 0 && count < 0) {
+						fprintf(stderr, "Can't find density or count attribute in feature being merged\n");
+						exit(EXIT_FAILURE);
+					}
+
+					if (count < 0) {
+						count = exp(log(density) * gamma) * zoom_max / exp(log(density_levels) * gamma);
+					}
+
+					for (size_t g = 0; g < feat.geometry.size(); g++) {
+						// XXX This thinks it knows that the moveto is always the top left of the pixel
+
+						if (feat.geometry[g].op == mvt_moveto) {
+							if (feat.geometry[g].x >= 0 &&
+							    feat.geometry[g].y >= 0 &&
+							    feat.geometry[g].x < (ssize_t) extent &&
+							    feat.geometry[g].y < (ssize_t) extent) {
+								t.count[extent * feat.geometry[g].y + feat.geometry[g].x] += count;
+							}
+						}
+					}
 				}
 			}
 		}
-
-		png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
 	}
 
 	if (t.active) {
-		make_tile((*queue)[0]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[0]->global_density[t.z]);
+		make_tile((*queue)[0]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[0]->global_density[t.z], (*queue)[0]->layername);
 	}
 
 	return NULL;
@@ -735,7 +839,7 @@ std::vector<long long> parse_max_density(const unsigned char *v) {
 	return out;
 }
 
-void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms, std::vector<long long> &zoom_max, double &midlat, double &midlon, double &minlat, double &minlon, double &maxlat, double &maxlon) {
+void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms, std::vector<long long> &zoom_max, double &midlat, double &midlon, double &minlat, double &minlon, double &maxlat, double &maxlon, std::string const &layername) {
 	std::vector<tile_reader> readers;
 	size_t total_rows = 0;
 	size_t seq = 0;
@@ -793,6 +897,16 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			sqlite3_finalize(stmt);
 		}
 
+		if (sqlite3_prepare_v2(r.db, "SELECT value from metadata where name = 'format';", -1, &stmt, NULL) == SQLITE_OK) {
+			if (sqlite3_step(stmt) == SQLITE_ROW) {
+				r.format = (const char *) sqlite3_column_text(stmt, 0);
+			} else {
+				fprintf(stderr, "%s: No format value in metadata\n", fnames[i]);
+				exit(EXIT_FAILURE);
+			}
+			sqlite3_finalize(stmt);
+		}
+
 		if (sqlite3_prepare_v2(r.db, "SELECT max(rowid) from tiles;", -1, &stmt, NULL) == SQLITE_OK) {
 			if (sqlite3_step(stmt) == SQLITE_ROW) {
 				total_rows += sqlite3_column_int(stmt, 0);
@@ -810,6 +924,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			r.zoom = sqlite3_column_int(r.stmt, 0);
 			r.x = sqlite3_column_int(r.stmt, 1);
 			r.sorty = sqlite3_column_int(r.stmt, 2);
+			r.layername = layername;
 
 			const char *data = (const char *) sqlite3_column_blob(r.stmt, 3);
 			size_t len = sqlite3_column_bytes(r.stmt, 3);
@@ -896,6 +1011,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 			r.zoom = sqlite3_column_int(r.stmt, 0);
 			r.x = sqlite3_column_int(r.stmt, 1);
 			r.sorty = sqlite3_column_int(r.stmt, 2);
+			r.layername = layername;
 
 			const char *data = (const char *) sqlite3_column_blob(r.stmt, 3);
 			size_t len = sqlite3_column_bytes(r.stmt, 3);
@@ -934,19 +1050,35 @@ int main(int argc, char **argv) {
 	extern char *optarg;
 
 	char *outfile = NULL;
-	int zoom = -1;
+	int minzoom = 0;
+	int maxzoom = -1;
+	int bin = -1;
 	bool force = false;
 	size_t detail = 9;
+	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
+	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:d:l:m:g:bwc:q")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:g:bwc:qn:y:")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
 			break;
 
 		case 'z':
-			zoom = atoi(optarg);
+			maxzoom = atoi(optarg);
+			break;
+
+		case 'Z':
+			minzoom = atoi(optarg);
+			break;
+
+		case 's':
+			bin = atoi(optarg);
+			break;
+
+		case 'p':
+			cpus = atoi(optarg);
 			break;
 
 		case 'd':
@@ -965,8 +1097,24 @@ int main(int argc, char **argv) {
 			}
 			break;
 
+		case 'n':
+			layername = optarg;
+			break;
+
 		case 'm':
 			first_level = atoi(optarg);
+			break;
+
+		case 'y':
+			if (strcmp(optarg, "count") == 0) {
+				include_count = true;
+			} else if (strcmp(optarg, "density") == 0) {
+				include_density = true;
+			} else {
+				fprintf(stderr, "Unknown attribute: -y %s\n", optarg);
+				exit(EXIT_FAILURE);
+			}
+
 			break;
 
 		case 'g':
@@ -1007,7 +1155,9 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
+	if (!(include_count || include_density)) {
+		include_density = true;
+	}
 
 	if (force) {
 		unlink(outfile);
@@ -1037,16 +1187,25 @@ int main(int argc, char **argv) {
 	}
 
 	if (zooms == 0) {
-		if (optind + 1 != argc || zoom < 0 || outfile == NULL) {
+		if (optind + 1 != argc || (maxzoom < 0 && bin < 0) || outfile == NULL) {
 			usage(argv);
 		}
 
-		if (zoom < (signed) (detail + 1)) {
-			fprintf(stderr, "%s: Detail (%zu) too low for zoom (%d)\n", argv[0], detail, zoom);
+		if (maxzoom < 0 && bin < 0) {
+			fprintf(stderr, "%s: Must specify either maxzoom (-z) or bin size (-s)\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 
-		zooms = zoom - detail + 1;
+		if (maxzoom >= 0) {
+			zooms = maxzoom + 1;
+		} else {
+			if (bin < (signed) (detail + 1)) {
+				fprintf(stderr, "%s: Detail (%zu) too low for bin size (%d)\n", argv[0], detail, bin);
+				exit(EXIT_FAILURE);
+			}
+
+			zooms = bin - detail + 1;
+		}
 
 		struct stat st;
 		if (stat(argv[optind], &st) != 0) {
@@ -1085,6 +1244,7 @@ int main(int argc, char **argv) {
 				tilers[j].bbox[2] = tilers[j].bbox[3] = 0;
 				tilers[j].midx = tilers[j].midy = 0;
 				tilers[j].zooms = zooms;
+				tilers[j].minzoom = minzoom;
 				tilers[j].detail = detail;
 				tilers[j].outdb = outdb;
 				tilers[j].progress = progress;
@@ -1094,6 +1254,7 @@ int main(int argc, char **argv) {
 				tilers[j].maxzoom = zooms - 1;
 				tilers[j].pass = pass;
 				tilers[j].zoom_max = zoom_max;
+				tilers[j].layername = layername;
 			}
 
 			size_t records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
@@ -1149,7 +1310,7 @@ int main(int argc, char **argv) {
 				if (pass == 0) {
 					gather_quantile(tilers[0].quantiles[a->second.z], a->second, detail, tilers[0].max[a->second.z]);
 				} else {
-					make_tile(outdb, a->second, a->second.z, detail, zoom_max[a->second.z]);
+					make_tile(outdb, a->second, a->second.z, detail, zoom_max[a->second.z], layername);
 				}
 			}
 
@@ -1173,7 +1334,7 @@ int main(int argc, char **argv) {
 					zoom_max.push_back(max);
 				}
 
-				regress(zoom_max);
+				regress(zoom_max, minzoom);
 			} else {
 				long long file_bbox[4] = {UINT_MAX, UINT_MAX, 0, 0};
 				for (size_t j = 0; j < cpus; j++) {
@@ -1205,29 +1366,31 @@ int main(int argc, char **argv) {
 		}
 	} else {
 		fprintf(stderr, "going to merge %zu zoom levels\n", zooms);
-		merge_tiles(argv + optind, argc - optind, cpus, outdb, zooms, zoom_max, midlat, midlon, minlat, minlon, maxlat, maxlon);
+		merge_tiles(argv + optind, argc - optind, cpus, outdb, zooms, zoom_max, midlat, midlon, minlat, minlon, maxlat, maxlon, layername);
 	}
 
 	layermap_entry lme(0);
 
-#if 0
-	type_and_string tas;
-	tas.type = VT_NUMBER;
-	tas.string = "count";
-	lme.file_keys.insert(tas);
-#endif
+	if (include_count) {
+		type_and_string tas;
+		tas.type = mvt_double;
+		tas.string = "count";
+		lme.file_keys.insert(tas);
+	}
 
-	type_and_string tas2;
-	tas2.type = VT_NUMBER;
-	tas2.string = "density";
-	lme.file_keys.insert(tas2);
+	if (include_density) {
+		type_and_string tas2;
+		tas2.type = mvt_double;
+		tas2.string = "density";
+		lme.file_keys.insert(tas2);
+	}
 
 	lme.minzoom = 0;
 	lme.maxzoom = zooms - 1;
 
 	std::map<std::string, layermap_entry> lm;
 	if (!bitmap) {
-		lm.insert(std::pair<std::string, layermap_entry>("count", lme));
+		lm.insert(std::pair<std::string, layermap_entry>(layername, lme));
 	}
 
 	mbtiles_write_metadata(outdb, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, !bitmap);

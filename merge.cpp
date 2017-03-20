@@ -130,13 +130,12 @@ void *run_merge(void *va) {
 	return NULL;
 }
 
-void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long nrec, int zoom, bool quiet) {
+void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long nrec, int zoom, bool quiet, size_t cpus) {
 	unsigned long long mask = 0;
 	if (zoom != 0) {
 		mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);
 	}
 
-	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 	unsigned long long beginning[cpus];
 
 	struct val {

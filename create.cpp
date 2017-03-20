@@ -134,9 +134,7 @@ void *run_sort(void *p) {
 	return NULL;
 }
 
-void sort_and_merge(int fd, int out, int zoom) {
-	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
-
+void sort_and_merge(int fd, int out, int zoom, size_t cpus) {
 	struct stat st;
 	if (fstat(fd, &st) < 0) {
 		perror("stat");
@@ -206,7 +204,7 @@ void sort_and_merge(int fd, int out, int zoom) {
 			merges[i].map = (unsigned char *) map;
 		}
 
-		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom, quiet);
+		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom, quiet, cpus);
 		munmap(map, st.st_size);
 	}
 }
@@ -217,16 +215,21 @@ int main(int argc, char **argv) {
 
 	char *outfile = NULL;
 	int zoom = 32;
+	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:o:q")) != -1) {
+	while ((i = getopt(argc, argv, "fs:o:p:q")) != -1) {
 		switch (i) {
-		case 'z':
+		case 's':
 			zoom = atoi(optarg);
 			break;
 
 		case 'o':
 			outfile = optarg;
+			break;
+
+		case 'p':
+			cpus = atoi(optarg);
 			break;
 
 		case 'q':
@@ -297,7 +300,7 @@ int main(int argc, char **argv) {
 		perror(outfile);
 		exit(EXIT_FAILURE);
 	}
-	sort_and_merge(fd, f, zoom);
+	sort_and_merge(fd, f, zoom, cpus);
 	if (close(f) != 0) {
 		perror("close");
 	}

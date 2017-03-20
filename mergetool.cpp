@@ -21,16 +21,21 @@ int main(int argc, char **argv) {
 
 	char *outfile = NULL;
 	int zoom = 32;
+	size_t cpus = sysconf(_SC_NPROCESSORS_ONLN);
 
 	int i;
-	while ((i = getopt(argc, argv, "o:z:q")) != -1) {
+	while ((i = getopt(argc, argv, "o:s:q")) != -1) {
 		switch (i) {
-		case 'z':
+		case 's':
 			zoom = atoi(optarg);
 			break;
 
 		case 'o':
 			outfile = optarg;
+			break;
+
+		case 'p':
+			cpus = atoi(optarg);
 			break;
 
 		case 'q':
@@ -97,7 +102,7 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	do_merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom, quiet);
+	do_merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom, quiet, cpus);
 	if (close(out) != 0) {
 		perror("close");
 		exit(EXIT_FAILURE);
