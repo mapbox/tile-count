@@ -77,4 +77,11 @@ test: all
 	tippecanoe-decode tests/tmp/both.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"max_density"' -e '"name"' > tests/tmp/both.geojson
 	tippecanoe-decode tests/tmp/merged.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"max_density"' -e '"name"' > tests/tmp/merged.geojson
 	cmp tests/tmp/both.geojson tests/tmp/merged.geojson
+	# Verify round-trip between normalized vectors and bitmaps
+	./tile-count-tile -f -m0 -s16 -o tests/tmp/both.mbtiles tests/tmp/both.count
+	./tile-count-tile -f -m0 -b -o tests/tmp/bitmap.mbtiles tests/tmp/both.mbtiles
+	./tile-count-tile -f -m0 -o tests/tmp/bitmap-vector.mbtiles tests/tmp/bitmap.mbtiles
+	tippecanoe-decode tests/tmp/both.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/both.geojson
+	tippecanoe-decode tests/tmp/bitmap-vector.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/bitmap-vector.geojson
+	cmp tests/tmp/both.geojson tests/tmp/bitmap-vector.geojson
 	rm -rf tests/tmp

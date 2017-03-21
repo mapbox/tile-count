@@ -721,8 +721,15 @@ void *retile(void *v) {
 
 				for (size_t x = 0; x < width; x++) {
 					if (bytes[x] > 0) {
-						double bright = bytes[x] + .5;
-						double count = exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma);
+						double bright = bytes[x];
+						long long count = ceil(exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma));
+#if 0
+						int back = exp(log(exp(log(density_levels) * gamma) * count / zoom_max) / gamma);
+						if (back != bytes[x]) {
+							fprintf(stderr, "put in %d, got back %d (bitmap)\n", bytes[x], back);
+							exit(EXIT_FAILURE);
+						}
+#endif
 						t.count[width * y + x] += count;
 					}
 				}
@@ -786,7 +793,16 @@ void *retile(void *v) {
 
 						if (key == std::string("density")) {
 							if (val.type == mvt_uint) {
-								density = val.numeric_value.uint_value + .5;
+								density = val.numeric_value.uint_value;
+								count = ceil(exp(log(density) * gamma) * zoom_max / exp(log(density_levels) * gamma));
+
+#if 0
+								int back = exp(log(exp(log(density_levels) * gamma) * count / zoom_max) / gamma);
+								if (back != val.numeric_value.uint_value) {
+									fprintf(stderr, "put in %llu, got back %d (vector)\n", val.numeric_value.uint_value, back);
+									exit(EXIT_FAILURE);
+								}
+#endif
 							}
 						}
 						if (key == std::string("count")) {
@@ -799,10 +815,6 @@ void *retile(void *v) {
 					if (density < 0 && count < 0) {
 						fprintf(stderr, "Can't find density or count attribute in feature being merged\n");
 						exit(EXIT_FAILURE);
-					}
-
-					if (count < 0) {
-						count = exp(log(density) * gamma) * zoom_max / exp(log(density_levels) * gamma);
 					}
 
 					for (size_t g = 0; g < feat.geometry.size(); g++) {
