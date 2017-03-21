@@ -173,19 +173,23 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 	bool anything = false;
 	std::string compressed;
 
+	std::vector<long long> normalized;
+	normalized.resize(tile.count.size());
+
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
+			long long density = 0;
 
 			if (count > 0) {
-				count = exp(log(exp(log(levels) * count_gamma) * count / zoom_max) / count_gamma);
+				density = exp(log(exp(log(levels) * count_gamma) * count / zoom_max) / count_gamma);
 			}
-			if (count > levels - 1) {
-				count = levels - 1;
+			if (density > levels - 1) {
+				density = levels - 1;
 			}
 
-			tile.count[y * (1 << detail) + x] = count;
-			if (count != 0 && (bitmap || count >= first_level)) {
+			normalized[y * (1 << detail) + x] = density;
+			if (density != 0 && (bitmap || density >= first_level)) {
 				anything = true;
 			}
 		}
@@ -204,8 +208,8 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			rows[y] = new unsigned char[1U << detail];
 
 			for (size_t x = 0; x < (1U << detail); x++) {
-				long long count = tile.count[y * (1 << detail) + x];
-				rows[y][x] = count;
+				long long density = normalized[y * (1 << detail) + x];
+				rows[y][x] = density;
 			}
 		}
 
@@ -263,8 +267,7 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 		if (single_polygons) {
 			for (size_t y = 0; y < (1U << detail); y++) {
 				for (size_t x = 0; x < (1U << detail); x++) {
-					long long density = tile.count[y * (1 << detail) + x];
-					if (density != 0) {
+					if (tile.count[y * (1 << detail) + x] != 0) {
 						mvt_feature feature;
 						feature.type = mvt_polygon;
 
@@ -277,16 +280,14 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 						if (include_density) {
 							mvt_value val;
 							val.type = mvt_uint;
-							val.numeric_value.uint_value = density;
+							val.numeric_value.uint_value = normalized[y * (1 << detail) + x];
 							layer.tag(feature, "density", val);
 						}
 
 						if (include_count) {
-							double count = exp(log(density) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
-
 							mvt_value val;
 							val.type = mvt_uint;
-							val.numeric_value.uint_value = count;
+							val.numeric_value.uint_value = tile.count[y * (1 << detail) + x];
 							layer.tag(feature, "count", val);
 						}
 
@@ -297,9 +298,9 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 		} else {
 			for (size_t y = 0; y < (1U << detail); y++) {
 				for (size_t x = 0; x < (1U << detail); x++) {
-					long long count = tile.count[y * (1 << detail) + x];
-					if (count != 0) {
-						mvt_feature &feature = features[count];
+					long long density = normalized[y * (1 << detail) + x];
+					if (density != 0) {
+						mvt_feature &feature = features[density];
 						feature.type = mvt_polygon;
 
 						feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
@@ -720,8 +721,15 @@ void *retile(void *v) {
 
 				for (size_t x = 0; x < width; x++) {
 					if (bytes[x] > 0) {
-						double bright = bytes[x] + .5;
-						double count = exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma);
+						double bright = bytes[x];
+						long long count = ceil(exp(log(bright) * gamma) * zoom_max / exp(log(density_levels) * gamma));
+#if 0
+						int back = exp(log(exp(log(density_levels) * gamma) * count / zoom_max) / gamma);
+						if (back != bytes[x]) {
+							fprintf(stderr, "put in %d, got back %d (bitmap)\n", bytes[x], back);
+							exit(EXIT_FAILURE);
+						}
+#endif
 						t.count[width * y + x] += count;
 					}
 				}
@@ -785,12 +793,21 @@ void *retile(void *v) {
 
 						if (key == std::string("density")) {
 							if (val.type == mvt_uint) {
-								density = val.numeric_value.uint_value + .5;
+								density = val.numeric_value.uint_value;
+								count = ceil(exp(log(density) * gamma) * zoom_max / exp(log(density_levels) * gamma));
+
+#if 0
+								int back = exp(log(exp(log(density_levels) * gamma) * count / zoom_max) / gamma);
+								if (back != val.numeric_value.uint_value) {
+									fprintf(stderr, "put in %llu, got back %d (vector)\n", val.numeric_value.uint_value, back);
+									exit(EXIT_FAILURE);
+								}
+#endif
 							}
 						}
 						if (key == std::string("count")) {
 							if (val.type == mvt_uint) {
-								count = val.numeric_value.uint_value + 1;
+								count = val.numeric_value.uint_value;
 							}
 						}
 					}
@@ -798,10 +815,6 @@ void *retile(void *v) {
 					if (density < 0 && count < 0) {
 						fprintf(stderr, "Can't find density or count attribute in feature being merged\n");
 						exit(EXIT_FAILURE);
-					}
-
-					if (count < 0) {
-						count = exp(log(density) * gamma) * zoom_max / exp(log(density_levels) * gamma);
 					}
 
 					for (size_t g = 0; g < feat.geometry.size(); g++) {
