@@ -179,12 +179,12 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
 			long long count = tile.count[y * (1 << detail) + x];
-			long long density;
+			long long density = 0;
 
 			if (count > 0) {
 				density = exp(log(exp(log(levels) * count_gamma) * count / zoom_max) / count_gamma);
 			}
-			if (count > levels - 1) {
+			if (density > levels - 1) {
 				density = levels - 1;
 			}
 
