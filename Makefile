@@ -59,3 +59,22 @@ clean:
 
 indent:
 	clang-format -i -style="{BasedOnStyle: Google, IndentWidth: 8, UseTab: Always, AllowShortIfStatementsOnASingleLine: false, ColumnLimit: 0, ContinuationIndentWidth: 8, SpaceAfterCStyleCast: true, IndentCaseLabels: false, AllowShortBlocksOnASingleLine: false, AllowShortFunctionsOnASingleLine: false, SortIncludes: false}" $(C) $(H)
+
+test: all
+	rm -rf tests/tmp
+	mkdir -p tests/tmp
+	./tile-count-create -s20 -o tests/tmp/1.count tests/1.json
+	./tile-count-create -o tests/tmp/2.count tests/2.json
+	cat tests/1.json tests/2.json | ./tile-count-create -s16 -o tests/tmp/both.count
+	# Verify merging of .count files
+	./tile-count-merge -s16 -o tests/tmp/merged.count tests/tmp/1.count tests/tmp/2.count
+	cmp tests/tmp/merged.count tests/tmp/both.count
+	# Verify merging of vector mbtiles with separate features per bin
+	./tile-count-tile -f -m0 -1 -y count -s16 -o tests/tmp/1.mbtiles tests/tmp/1.count
+	./tile-count-tile -f -m0 -1 -y count -s16 -o tests/tmp/2.mbtiles tests/tmp/2.count
+	./tile-count-tile -f -m0 -1 -y count -s16 -o tests/tmp/both.mbtiles tests/tmp/both.count
+	./tile-count-tile -f -m0 -1 -y count -s16 -o tests/tmp/merged.mbtiles tests/tmp/1.mbtiles tests/tmp/2.mbtiles
+	tippecanoe-decode tests/tmp/both.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"max_density"' -e '"name"' > tests/tmp/both.geojson
+	tippecanoe-decode tests/tmp/merged.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"max_density"' -e '"name"' > tests/tmp/merged.geojson
+	cmp tests/tmp/both.geojson tests/tmp/merged.geojson
+	rm -rf tests/tmp
