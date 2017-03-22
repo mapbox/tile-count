@@ -84,7 +84,8 @@ instead of merging existing tilesets. The `bin size` plus the `detail` always eq
 ### Level bucketing
 
 * `-l` *levels*: Quantize the normalized counts within each tile into the specified number of levels. The default is 50.
-* `-m` *level*: Don't include normalized counts that are quantized below the specified level. The default is 6. In bitmap tiles, all levels are included.
+* `-m` *level*: Don't include normalized counts that are quantized below the specified level.
+* `-M` *count*: don't include absolute counts that are below the specified count.
 * `-g` *gamma*: Scale the counts within each tile to the gamma'th root of their linear value. The default is 2.5.
 * `-y density`: Include an attribute in each vector feature indicating the normalized density of points within each bin. This is the default.
 * `-y count`: Include an attribute in each vector feature indicating the count of points within each bin. The count is only approximate because the levels are bucketed.

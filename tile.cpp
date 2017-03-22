@@ -28,7 +28,8 @@
 #include "tippecanoe/mbtiles.hpp"
 
 int levels = 50;
-int first_level = 6;
+int first_level = 0;
+int first_count = 0;
 double count_gamma = 2.5;
 
 bool bitmap = false;
@@ -171,7 +172,6 @@ static void fail(png_structp png_ptr, png_const_charp error_msg) {
 }
 
 void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max, std::string const &layername) {
-	bool anything = false;
 	std::string compressed;
 
 	std::vector<long long> normalized;
@@ -182,27 +182,32 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			long long count = tile.count[y * (1 << detail) + x];
 			long long density = 0;
 
+			if (count > 0 && count < first_count) {
+				count = 0;
+				tile.count[y * (1 << detail) + x] = 0;
+			}
+
 			if (count > 0) {
 				density = exp(log(exp(log(levels) * count_gamma) * count / zoom_max) / count_gamma);
+
+				if (density < first_level) {
+					density = 0;
+					count = 0;
+					tile.count[y * (1 << detail) + x] = 0;
+				}
 			}
 			if (density > levels - 1) {
 				density = levels - 1;
 			}
 
 			normalized[y * (1 << detail) + x] = density;
-			if (density != 0 && (bitmap || density >= first_level)) {
-				anything = true;
-			}
 		}
-	}
-
-	if (!anything) {
-		return;
 	}
 
 	if (bitmap) {
 		png_structp png_ptr;
 		png_infop info_ptr;
+		bool anything = false;
 
 		unsigned char *rows[1U << detail];
 		for (size_t y = 0; y < 1U << detail; y++) {
@@ -211,7 +216,15 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			for (size_t x = 0; x < (1U << detail); x++) {
 				long long density = normalized[y * (1 << detail) + x];
 				rows[y][x] = density;
+
+				if (density > 0) {
+					anything = true;
+				}
 			}
+		}
+
+		if (!anything) {
+			return;
 		}
 
 		png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
@@ -317,6 +330,11 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 				if (features[i].geometry.size() != 0) {
 					// features[i].geometry = merge_rings(features[i].geometry);
 
+					long long count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
+					if (count < first_count) {
+						continue;
+					}
+
 					if (include_density) {
 						mvt_value val;
 						val.type = mvt_uint;
@@ -325,8 +343,6 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 					}
 
 					if (include_count) {
-						double count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
-
 						mvt_value val;
 						val.type = mvt_uint;
 						val.numeric_value.uint_value = count;
@@ -1111,7 +1127,7 @@ int main(int argc, char **argv) {
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:g:bwc:qn:y:1k")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bwc:qn:y:1k")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -1159,6 +1175,10 @@ int main(int argc, char **argv) {
 
 		case 'm':
 			first_level = atoi(optarg);
+			break;
+
+		case 'M':
+			first_count = atoi(optarg);
 			break;
 
 		case 'y':
