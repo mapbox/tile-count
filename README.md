@@ -99,6 +99,7 @@ instead of merging existing tilesets. The `bin size` plus the `detail` always eq
 ### Vector tiles
 
 * `-1`: Output an individual polygon for each bin instead of combining them into MultiPolygons.
+* `-k`: Don't enforce the 500K limit on tile size
 
 ### Miscellaneous controls
 

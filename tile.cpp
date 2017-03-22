@@ -36,6 +36,7 @@ int color = 0x888888;
 int white = 0;
 
 bool single_polygons = false;
+bool limit_tile_sizes = true;
 
 bool quiet = false;
 bool include_density = false;
@@ -349,7 +350,7 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 		return;
 	}
 
-	if (compressed.size() > 500000) {
+	if (limit_tile_sizes && compressed.size() > 500000) {
 		fprintf(stderr, "Tile is too big: %zu\n", compressed.size());
 		exit(EXIT_FAILURE);
 	}
@@ -1110,7 +1111,7 @@ int main(int argc, char **argv) {
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:g:bwc:qn:y:1")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:g:bwc:qn:y:1k")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -1138,6 +1139,10 @@ int main(int argc, char **argv) {
 
 		case 'q':
 			quiet = true;
+			break;
+
+		case 'k':
+			limit_tile_sizes = false;
 			break;
 
 		case 'l':
