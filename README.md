@@ -38,8 +38,8 @@ Merging counts
 Produces a new count file from the specified count files, summing the counts for any points
 duplicated between the two.
 
-* `-s binsize`: The precision of all locations in the output file will be reduced as specified.
-* `-q': Silence the progress indicator
+* `-s` *binsize*: The precision of all locations in the output file will be reduced as specified.
+* `-q`: Silence the progress indicator
 
 Decoding counts
 ---------------
@@ -67,7 +67,7 @@ that are for the same area.
 
 ### Output tileset
 
-* `-n` *layername: Specify the layer name in vector tile output. The default is `count`.
+* `-n` *layername*: Specify the layer name in vector tile output. The default is `count`.
 * `-o` *out.mbtiles*: Specify the name of the output file.
 * `-f`: Delete the output file if it already exists
 
