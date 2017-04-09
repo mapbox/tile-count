@@ -79,7 +79,7 @@ that are for the same area.
 * `-s` *binsize*: Specify the zoom level whose tiles are used as bins.
 
 You must specify either `-z` (maxzoom) or `-s` (bin size) if you are creating a new tileset
-instead of merging existing tilesets. The `bin size` plus the `detail` always equals the `maxzoom`.
+instead of merging existing tilesets. The *maxzoom* plus the *detail* always equals the *bin size*.
 
 ### Level bucketing
 
