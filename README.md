@@ -3,6 +3,16 @@ tile-count
 
 A tool for accumulating point counts by tile.
 
+Installation
+------------
+
+Tile-count requires sqlite3 and libpng.
+
+```
+$ sudo apt-get install libsqlite3-dev libpng-dev
+$ make install
+```
+
 Creating a count
 ----------------
 
