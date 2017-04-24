@@ -18,7 +18,7 @@ extern "C" {
 bool quiet = false;
 
 void usage(char **argv) {
-	fprintf(stderr, "Usage: %s -o out.count [-z zoom] [in.csv ...]\n", argv[0]);
+	fprintf(stderr, "Usage: %s -o out.count [-s binsize] [in.csv ...]\n", argv[0]);
 }
 
 void write_point(FILE *out, long long &seq, double lon, double lat, unsigned long long count) {
