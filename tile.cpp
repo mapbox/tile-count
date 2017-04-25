@@ -74,7 +74,7 @@ struct tiler {
 	long long midx, midy;
 	long long atmid;
 
-	unsigned char *map;
+	FILE *fp;
 	size_t minzoom;
 	size_t zooms;
 	size_t detail;
@@ -399,17 +399,48 @@ void *run_tile(void *p) {
 		return NULL;
 	}
 
-	unsigned long long first = read64(t->map + HEADER_LEN + t->start * RECORD_BYTES);
-	unsigned long long last = read64(t->map + HEADER_LEN + (t->end - 1) * RECORD_BYTES);
+	unsigned char firstbuf[RECORD_BYTES];
+	unsigned char lastbuf[RECORD_BYTES];
+
+	if (fseeko(t->fp, t->start * RECORD_BYTES + HEADER_LEN, SEEK_SET) != 0) {
+		perror("fseeko");
+		exit(EXIT_FAILURE);
+	}
+	if (fread(firstbuf, RECORD_BYTES, 1, t->fp) != 1) {
+		perror("fread");
+		exit(EXIT_FAILURE);
+	}
+
+	if (fseeko(t->fp, (t->end - 1) * RECORD_BYTES + HEADER_LEN, SEEK_SET) != 0) {
+		perror("fseeko");
+		exit(EXIT_FAILURE);
+	}
+	if (fread(lastbuf, RECORD_BYTES, 1, t->fp) != 1) {
+		perror("fread");
+		exit(EXIT_FAILURE);
+	}
+
+	unsigned long long first = read64(firstbuf);
+	unsigned long long last = read64(lastbuf);
 
 	long long seq = 0;
 	long long percent = -1;
 	long long max = 0;
 
+	if (fseeko(t->fp, t->start * RECORD_BYTES + HEADER_LEN, SEEK_SET) != 0) {
+		perror("fseeko");
+		exit(EXIT_FAILURE);
+	}
+
 	unsigned long long oindex = 0;
 	for (size_t i = t->start; i < t->end; i++) {
-		unsigned long long index = read64(t->map + HEADER_LEN + i * RECORD_BYTES);
-		unsigned long long count = read32(t->map + HEADER_LEN + i * RECORD_BYTES + INDEX_BYTES);
+		unsigned char buf[RECORD_BYTES];
+		if (fread(buf, RECORD_BYTES, 1, t->fp) != 1) {
+			perror("fread");
+			exit(EXIT_FAILURE);
+		}
+		unsigned long long index = read64(buf);
+		unsigned long long count = read32(buf + INDEX_BYTES);
 		seq++;
 
 		if (oindex > index) {
@@ -1290,18 +1321,21 @@ int main(int argc, char **argv) {
 			exit(EXIT_FAILURE);
 		}
 
-		int fd = open(argv[optind], O_RDONLY);
-		if (fd < 0) {
-			perror(argv[optind]);
-			exit(EXIT_FAILURE);
-		}
-		unsigned char *map = (unsigned char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
-		if (map == MAP_FAILED) {
-			perror("mmap");
-			exit(EXIT_FAILURE);
+		FILE *fps[cpus];
+		for (size_t j = 0; j < cpus; j++) {
+			fps[j] = fopen(argv[optind], "rb");
+			if (fps[j] == NULL) {
+				perror(argv[optind]);
+				exit(EXIT_FAILURE);
+			}
 		}
 
-		if (memcmp(map, header_text, HEADER_LEN) != 0) {
+		char buf[HEADER_LEN];
+		if (fread(buf, HEADER_LEN, 1, fps[0]) != 1) {
+			perror("fread file header");
+			exit(EXIT_FAILURE);
+		}
+		if (memcmp(buf, header_text, HEADER_LEN) != 0) {
 			fprintf(stderr, "%s: not a tile-count file\n", argv[optind]);
 			exit(EXIT_FAILURE);
 		}
@@ -1335,7 +1369,7 @@ int main(int argc, char **argv) {
 
 			size_t records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
 			for (size_t j = 0; j < cpus; j++) {
-				tilers[j].map = map;
+				tilers[j].fp = fps[j];
 				tilers[j].start = j * records / cpus;
 				if (j > 0) {
 					tilers[j - 1].end = tilers[j].start;
