@@ -202,9 +202,18 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 	}
 
 	if (bitmap) {
-		png_structp png_ptr;
-		png_infop info_ptr;
 		bool anything = false;
+		for (size_t y = 0; y < 1U << detail; y++) {
+			for (size_t x = 0; x < (1U << detail); x++) {
+				long long density = normalized[y * (1 << detail) + x];
+				if (density > 0) {
+					anything = true;
+				}
+			}
+		}
+		if (!anything) {
+			return;
+		}
 
 		unsigned char *rows[1U << detail];
 		for (size_t y = 0; y < 1U << detail; y++) {
@@ -213,16 +222,11 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			for (size_t x = 0; x < (1U << detail); x++) {
 				long long density = normalized[y * (1 << detail) + x];
 				rows[y][x] = density;
-
-				if (density > 0) {
-					anything = true;
-				}
 			}
 		}
 
-		if (!anything) {
-			return;
-		}
+		png_structp png_ptr;
+		png_infop info_ptr;
 
 		png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
 		if (png_ptr == NULL) {
@@ -260,6 +264,8 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			png_set_rows(png_ptr, info_ptr, rows);
 			png_set_write_fn(png_ptr, &compressed, string_append, NULL);
 			png_write_png(png_ptr, info_ptr, 0, NULL);
+			png_write_end(png_ptr, info_ptr);
+			png_destroy_info_struct(png_ptr, &info_ptr);
 			png_destroy_write_struct(&png_ptr, &info_ptr);
 		}
 
