@@ -187,6 +187,62 @@ void get_color(int i, png_color &out, png_byte &transparency) {
 	}
 }
 
+struct jpeg_writer {
+	struct jpeg_destination_mgr pub;
+
+	unsigned char *buffer;
+	size_t capacity;
+
+	std::string *s;
+
+	jpeg_writer(std::string *out) {
+		capacity = 4000;
+		buffer = new unsigned char[capacity];
+		s = out;
+	}
+
+	~jpeg_writer() {
+		delete[] buffer;
+	}
+};
+
+void jpeg_writer_init_destination(j_compress_ptr cinfo) {
+	jpeg_writer *dest = (jpeg_writer *) cinfo->dest;
+
+	*(dest->s) = "";
+	dest->pub.next_output_byte = dest->buffer;
+	dest->pub.free_in_buffer = dest->capacity;
+}
+
+boolean jpeg_writer_empty_output_buffer(j_compress_ptr cinfo) {
+	jpeg_writer *dest = (jpeg_writer *) cinfo->dest;
+
+	*(dest->s) += std::string((char *) dest->buffer, dest->capacity);
+	dest->pub.next_output_byte = dest->buffer;
+	dest->pub.free_in_buffer = dest->capacity;
+	return TRUE;
+}
+
+void jpeg_writer_term_destination(j_compress_ptr cinfo) {
+	jpeg_writer *dest = (jpeg_writer *) cinfo->dest;
+
+	size_t datacount = dest->capacity - dest->pub.free_in_buffer;
+	if (datacount > 0) {
+		*(dest->s) += std::string((char *) dest->buffer, datacount);
+	}
+}
+
+jpeg_writer *jpeg_writer_dest(j_compress_ptr cinfo, std::string *out) {
+	cinfo->dest = (struct jpeg_destination_mgr *) new jpeg_writer(out);
+
+	jpeg_writer *dest = (jpeg_writer *) cinfo->dest;
+	dest->pub.init_destination = jpeg_writer_init_destination;
+	dest->pub.empty_output_buffer = jpeg_writer_empty_output_buffer;
+	dest->pub.term_destination = jpeg_writer_term_destination;
+
+	return dest;
+}
+
 void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max, std::string const &layername) {
 	std::string compressed;
 
@@ -249,15 +305,9 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			struct jpeg_error_mgr jerr;
 			JSAMPROW row_pointer[1];
 
-			FILE *outfile = tmpfile(); // XXX write to memory instead
-			if (outfile == NULL) {
-				perror("tmpfile");
-				exit(EXIT_FAILURE);
-			}
-
 			cinfo.err = jpeg_std_error(&jerr);
 			jpeg_create_compress(&cinfo);
-			jpeg_stdio_dest(&cinfo, outfile);
+			jpeg_writer *jw = jpeg_writer_dest(&cinfo, &compressed);
 
 			cinfo.image_width = 1U << detail;
 			cinfo.image_height = 1U << detail;
@@ -298,15 +348,7 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 
 			jpeg_finish_compress(&cinfo);
 			jpeg_destroy_compress(&cinfo);
-
-			fseek(outfile, 0, SEEK_SET);
-			char buf[2000];
-			int n;
-			while ((n = fread(buf, 1, 2000, outfile)) > 0) {
-				compressed += std::string(buf, n);
-			}
-
-			fclose(outfile);
+			delete jw;
 		} else {
 			png_structp png_ptr;
 			png_infop info_ptr;
