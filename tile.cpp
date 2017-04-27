@@ -17,6 +17,7 @@
 #include <math.h>
 #include <time.h>
 #include <png.h>
+#include <jpeglib.h>
 #include "tippecanoe/projection.hpp"
 #include "protozero/varint.hpp"
 #include "protozero/pbf_reader.hpp"
@@ -32,6 +33,7 @@ int first_count = 0;
 double count_gamma = 2.5;
 
 bool bitmap = false;
+bool jpeg = false;
 int color = 0x888888;
 int white = 0;
 
@@ -168,6 +170,23 @@ static void fail(png_structp png_ptr, png_const_charp error_msg) {
 	exit(EXIT_FAILURE);
 }
 
+void get_color(int i, png_color &out, png_byte &transparency) {
+	if (i < levels / 2) {
+		out.red = (color >> 16) & 0xFF;
+		out.green = (color >> 8) & 0xFF;
+		out.blue = (color >> 0) & 0xFF;
+		transparency = 255 * i / (levels / 2);
+	} else {
+		double along = 255 * (i - levels / 2) / (levels - levels / 2 - 1) / 255.0;
+		int fg = white ? 0x00 : 0xFF;
+
+		out.red = ((color >> 16) & 0xFF) * (1 - along) + fg * (along);
+		out.green = ((color >> 8) & 0xFF) * (1 - along) + fg * (along);
+		out.blue = ((color >> 0) & 0xFF) * (1 - along) + fg * (along);
+		transparency = 255;
+	}
+}
+
 void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max, std::string const &layername) {
 	std::string compressed;
 
@@ -203,7 +222,7 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 
 	if (bitmap) {
 		bool anything = false;
-		for (size_t y = 0; y < 1U << detail; y++) {
+		for (size_t y = 0; y < (1U << detail); y++) {
 			for (size_t x = 0; x < (1U << detail); x++) {
 				long long density = normalized[y * (1 << detail) + x];
 				if (density > 0) {
@@ -225,48 +244,101 @@ void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max
 			}
 		}
 
-		png_structp png_ptr;
-		png_infop info_ptr;
+		if (jpeg) {
+			struct jpeg_compress_struct cinfo;
+			struct jpeg_error_mgr jerr;
+			JSAMPROW row_pointer[1];
 
-		png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
-		if (png_ptr == NULL) {
-			fprintf(stderr, "PNG failure (write struct)\n");
-			exit(EXIT_FAILURE);
-		}
-		info_ptr = png_create_info_struct(png_ptr);
-		if (info_ptr == NULL) {
-			png_destroy_write_struct(&png_ptr, NULL);
-			fprintf(stderr, "PNG failure (info struct)\n");
-			exit(EXIT_FAILURE);
+			FILE *outfile = tmpfile(); // XXX write to memory instead
+			if (outfile == NULL) {
+				perror("tmpfile");
+				exit(EXIT_FAILURE);
+			}
+
+			cinfo.err = jpeg_std_error(&jerr);
+			jpeg_create_compress(&cinfo);
+			jpeg_stdio_dest(&cinfo, outfile);
+
+			cinfo.image_width = 1U << detail;
+			cinfo.image_height = 1U << detail;
+			cinfo.input_components = 3;
+			cinfo.in_color_space = JCS_RGB;
+			jpeg_set_defaults(&cinfo);
+			jpeg_set_quality(&cinfo, 75, TRUE);
+			jpeg_start_compress(&cinfo, TRUE);
+
+			for (size_t y = 0; y < (1U << detail); y++) {
+				unsigned char buf[3U << detail];
+				int base = 0;
+
+				if (white) {
+					base = 255;
+				} else {
+					base = 0;
+				}
+
+				for (size_t x = 0; x < (1U << detail); x++) {
+					png_byte transparency;
+					png_color c;
+
+					get_color(rows[y][x], c, transparency);
+
+					c.red = c.red * transparency / 255.0 + base * (255 - transparency) / 255.0;
+					c.green = c.green * transparency / 255.0 + base * (255 - transparency) / 255.0;
+					c.blue = c.blue * transparency / 255.0 + base * (255 - transparency) / 255.0;
+
+					buf[3 * x + 0] = c.red;
+					buf[3 * x + 1] = c.green;
+					buf[3 * x + 2] = c.blue;
+				}
+
+				row_pointer[0] = buf;
+				jpeg_write_scanlines(&cinfo, row_pointer, 1);
+			}
+
+			jpeg_finish_compress(&cinfo);
+			jpeg_destroy_compress(&cinfo);
+
+			fseek(outfile, 0, SEEK_SET);
+			char buf[2000];
+			int n;
+			while ((n = fread(buf, 1, 2000, outfile)) > 0) {
+				compressed += std::string(buf, n);
+			}
+
+			fclose(outfile);
 		} else {
-			png_set_IHDR(png_ptr, info_ptr, 1U << detail, 1U << detail, 8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+			png_structp png_ptr;
+			png_infop info_ptr;
 
-			png_byte transparency[levels];
-			png_color colors[levels];
-			for (int i = 0; i < levels / 2; i++) {
-				colors[i].red = (color >> 16) & 0xFF;
-				colors[i].green = (color >> 8) & 0xFF;
-				colors[i].blue = (color >> 0) & 0xFF;
-				transparency[i] = 255 * i / (levels / 2);
+			png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
+			if (png_ptr == NULL) {
+				fprintf(stderr, "PNG failure (write struct)\n");
+				exit(EXIT_FAILURE);
 			}
-			for (int i = levels / 2; i < levels; i++) {
-				double along = 255 * (i - levels / 2) / (levels - levels / 2 - 1) / 255.0;
-				int fg = white ? 0x00 : 0xFF;
+			info_ptr = png_create_info_struct(png_ptr);
+			if (info_ptr == NULL) {
+				png_destroy_write_struct(&png_ptr, NULL);
+				fprintf(stderr, "PNG failure (info struct)\n");
+				exit(EXIT_FAILURE);
+			} else {
+				png_set_IHDR(png_ptr, info_ptr, 1U << detail, 1U << detail, 8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
 
-				colors[i].red = ((color >> 16) & 0xFF) * (1 - along) + fg * (along);
-				colors[i].green = ((color >> 8) & 0xFF) * (1 - along) + fg * (along);
-				colors[i].blue = ((color >> 0) & 0xFF) * (1 - along) + fg * (along);
-				transparency[i] = 255;
+				png_byte transparency[levels];
+				png_color colors[levels];
+				for (int i = 0; i < levels; i++) {
+					get_color(i, colors[i], transparency[i]);
+				}
+				png_set_tRNS(png_ptr, info_ptr, transparency, levels, NULL);
+				png_set_PLTE(png_ptr, info_ptr, colors, levels);
+
+				png_set_rows(png_ptr, info_ptr, rows);
+				png_set_write_fn(png_ptr, &compressed, string_append, NULL);
+				png_write_png(png_ptr, info_ptr, 0, NULL);
+				png_write_end(png_ptr, info_ptr);
+				png_destroy_info_struct(png_ptr, &info_ptr);
+				png_destroy_write_struct(&png_ptr, &info_ptr);
 			}
-			png_set_tRNS(png_ptr, info_ptr, transparency, levels, NULL);
-			png_set_PLTE(png_ptr, info_ptr, colors, levels);
-
-			png_set_rows(png_ptr, info_ptr, rows);
-			png_set_write_fn(png_ptr, &compressed, string_append, NULL);
-			png_write_png(png_ptr, info_ptr, 0, NULL);
-			png_write_end(png_ptr, info_ptr);
-			png_destroy_info_struct(png_ptr, &info_ptr);
-			png_destroy_write_struct(&png_ptr, &info_ptr);
 		}
 
 		for (size_t i = 0; i < 1U << detail; i++) {
@@ -1161,7 +1233,7 @@ int main(int argc, char **argv) {
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bwc:qn:y:1k")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bjwc:qn:y:1k")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -1233,6 +1305,11 @@ int main(int argc, char **argv) {
 
 		case 'b':
 			bitmap = 1;
+			break;
+
+		case 'j':
+			bitmap = 1;
+			jpeg = 1;
 			break;
 
 		case 'c':
@@ -1502,7 +1579,7 @@ int main(int argc, char **argv) {
 		lm.insert(std::pair<std::string, layermap_entry>(layername, lme));
 	}
 
-	mbtiles_write_metadata(outdb, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, !bitmap);
+	mbtiles_write_metadata(outdb, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, jpeg ? "jpg" : bitmap ? "png" : "pbf");
 
 	write_meta(zoom_max, outdb);
 
