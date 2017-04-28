@@ -110,7 +110,11 @@ instead of merging existing tilesets. The *maxzoom* plus the *detail* always equ
 ### Vector tiles
 
 * `-1`: Output an individual polygon for each bin instead of combining them into MultiPolygons.
+
+### Tile size
+
 * `-k`: Don't enforce the 500K limit on tile size
+* `-K`: Raise the minimum count threshold on each tile if necessary to keep it under 500K.
 
 ### Miscellaneous controls
 
