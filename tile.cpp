@@ -37,10 +37,13 @@ int white = 0;
 
 bool single_polygons = false;
 bool limit_tile_sizes = true;
+bool increment_threshold = false;
 
 bool quiet = false;
 bool include_density = false;
 bool include_count = false;
+
+#define MAX_TILE_SIZE 500000
 
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s [options] -o out.mbtiles file.count\n", argv[0]);
@@ -168,210 +171,243 @@ static void fail(png_structp png_ptr, png_const_charp error_msg) {
 	exit(EXIT_FAILURE);
 }
 
-void make_tile(sqlite3 *outdb, tile &tile, int z, int detail, long long zoom_max, std::string const &layername) {
+void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_max, std::string const &layername) {
+	long long thresh = first_count;
+	bool again = true;
+	tile tile = otile;
+
 	std::string compressed;
 
-	std::vector<long long> normalized;
-	normalized.resize(tile.count.size());
+	while (again) {
+		again = false;
 
-	for (size_t y = 0; y < (1U << detail); y++) {
-		for (size_t x = 0; x < (1U << detail); x++) {
-			long long count = tile.count[y * (1 << detail) + x];
-			long long density = 0;
+		compressed = "";
+		tile = otile;
 
-			if (count > 0 && count < first_count) {
-				count = 0;
-				tile.count[y * (1 << detail) + x] = 0;
-			}
+		std::vector<long long> normalized;
+		normalized.resize(tile.count.size());
 
-			if (count > 0) {
-				density = exp(log(exp(log(levels) * count_gamma) * count / zoom_max) / count_gamma);
+		for (size_t y = 0; y < (1U << detail); y++) {
+			for (size_t x = 0; x < (1U << detail); x++) {
+				long long count = tile.count[y * (1 << detail) + x];
+				long long density = 0;
 
-				if (density < first_level) {
-					density = 0;
+				if (count > 0 && (count < first_count || count < thresh)) {
 					count = 0;
 					tile.count[y * (1 << detail) + x] = 0;
 				}
-			}
-			if (density > levels - 1) {
-				density = levels - 1;
-			}
 
-			normalized[y * (1 << detail) + x] = density;
+				if (count > 0) {
+					density = exp(log(exp(log(levels) * count_gamma) * count / zoom_max) / count_gamma);
+
+					if (density < first_level) {
+						density = 0;
+						count = 0;
+						tile.count[y * (1 << detail) + x] = 0;
+					}
+				}
+				if (density > levels - 1) {
+					density = levels - 1;
+				}
+
+				normalized[y * (1 << detail) + x] = density;
+			}
 		}
-	}
 
-	if (bitmap) {
-		bool anything = false;
-		for (size_t y = 0; y < 1U << detail; y++) {
-			for (size_t x = 0; x < (1U << detail); x++) {
-				long long density = normalized[y * (1 << detail) + x];
-				if (density > 0) {
-					anything = true;
+		if (bitmap) {
+			bool anything = false;
+			for (size_t y = 0; y < 1U << detail; y++) {
+				for (size_t x = 0; x < (1U << detail); x++) {
+					long long density = normalized[y * (1 << detail) + x];
+					if (density > 0) {
+						anything = true;
+					}
 				}
 			}
-		}
-		if (!anything) {
-			return;
-		}
-
-		unsigned char *rows[1U << detail];
-		for (size_t y = 0; y < 1U << detail; y++) {
-			rows[y] = new unsigned char[1U << detail];
-
-			for (size_t x = 0; x < (1U << detail); x++) {
-				long long density = normalized[y * (1 << detail) + x];
-				rows[y][x] = density;
+			if (!anything) {
+				return;
 			}
-		}
 
-		png_structp png_ptr;
-		png_infop info_ptr;
+			unsigned char *rows[1U << detail];
+			for (size_t y = 0; y < 1U << detail; y++) {
+				rows[y] = new unsigned char[1U << detail];
 
-		png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
-		if (png_ptr == NULL) {
-			fprintf(stderr, "PNG failure (write struct)\n");
-			exit(EXIT_FAILURE);
-		}
-		info_ptr = png_create_info_struct(png_ptr);
-		if (info_ptr == NULL) {
-			png_destroy_write_struct(&png_ptr, NULL);
-			fprintf(stderr, "PNG failure (info struct)\n");
-			exit(EXIT_FAILURE);
-		} else {
-			png_set_IHDR(png_ptr, info_ptr, 1U << detail, 1U << detail, 8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-
-			png_byte transparency[levels];
-			png_color colors[levels];
-			for (int i = 0; i < levels / 2; i++) {
-				colors[i].red = (color >> 16) & 0xFF;
-				colors[i].green = (color >> 8) & 0xFF;
-				colors[i].blue = (color >> 0) & 0xFF;
-				transparency[i] = 255 * i / (levels / 2);
-			}
-			for (int i = levels / 2; i < levels; i++) {
-				double along = 255 * (i - levels / 2) / (levels - levels / 2 - 1) / 255.0;
-				int fg = white ? 0x00 : 0xFF;
-
-				colors[i].red = ((color >> 16) & 0xFF) * (1 - along) + fg * (along);
-				colors[i].green = ((color >> 8) & 0xFF) * (1 - along) + fg * (along);
-				colors[i].blue = ((color >> 0) & 0xFF) * (1 - along) + fg * (along);
-				transparency[i] = 255;
-			}
-			png_set_tRNS(png_ptr, info_ptr, transparency, levels, NULL);
-			png_set_PLTE(png_ptr, info_ptr, colors, levels);
-
-			png_set_rows(png_ptr, info_ptr, rows);
-			png_set_write_fn(png_ptr, &compressed, string_append, NULL);
-			png_write_png(png_ptr, info_ptr, 0, NULL);
-			png_write_end(png_ptr, info_ptr);
-			png_destroy_info_struct(png_ptr, &info_ptr);
-			png_destroy_write_struct(&png_ptr, &info_ptr);
-		}
-
-		for (size_t i = 0; i < 1U << detail; i++) {
-			delete[] rows[i];
-		}
-	} else {
-		mvt_layer layer;
-		layer.name = layername;
-		layer.version = 2;
-		layer.extent = 1U << detail;
-
-		std::vector<mvt_feature> features;
-		features.resize(levels);
-
-		if (single_polygons) {
-			for (size_t y = 0; y < (1U << detail); y++) {
 				for (size_t x = 0; x < (1U << detail); x++) {
-					if (tile.count[y * (1 << detail) + x] != 0) {
-						mvt_feature feature;
-						feature.type = mvt_polygon;
+					long long density = normalized[y * (1 << detail) + x];
+					rows[y][x] = density;
+				}
+			}
 
-						feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
-						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
-						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
-						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
-						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+			png_structp png_ptr;
+			png_infop info_ptr;
+
+			png_ptr = png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, fail, fail);
+			if (png_ptr == NULL) {
+				fprintf(stderr, "PNG failure (write struct)\n");
+				exit(EXIT_FAILURE);
+			}
+			info_ptr = png_create_info_struct(png_ptr);
+			if (info_ptr == NULL) {
+				png_destroy_write_struct(&png_ptr, NULL);
+				fprintf(stderr, "PNG failure (info struct)\n");
+				exit(EXIT_FAILURE);
+			} else {
+				png_set_IHDR(png_ptr, info_ptr, 1U << detail, 1U << detail, 8, PNG_COLOR_TYPE_PALETTE, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+
+				png_byte transparency[levels];
+				png_color colors[levels];
+				for (int i = 0; i < levels / 2; i++) {
+					colors[i].red = (color >> 16) & 0xFF;
+					colors[i].green = (color >> 8) & 0xFF;
+					colors[i].blue = (color >> 0) & 0xFF;
+					transparency[i] = 255 * i / (levels / 2);
+				}
+				for (int i = levels / 2; i < levels; i++) {
+					double along = 255 * (i - levels / 2) / (levels - levels / 2 - 1) / 255.0;
+					int fg = white ? 0x00 : 0xFF;
+
+					colors[i].red = ((color >> 16) & 0xFF) * (1 - along) + fg * (along);
+					colors[i].green = ((color >> 8) & 0xFF) * (1 - along) + fg * (along);
+					colors[i].blue = ((color >> 0) & 0xFF) * (1 - along) + fg * (along);
+					transparency[i] = 255;
+				}
+				png_set_tRNS(png_ptr, info_ptr, transparency, levels, NULL);
+				png_set_PLTE(png_ptr, info_ptr, colors, levels);
+
+				png_set_rows(png_ptr, info_ptr, rows);
+				png_set_write_fn(png_ptr, &compressed, string_append, NULL);
+				png_write_png(png_ptr, info_ptr, 0, NULL);
+				png_write_end(png_ptr, info_ptr);
+				png_destroy_info_struct(png_ptr, &info_ptr);
+				png_destroy_write_struct(&png_ptr, &info_ptr);
+			}
+
+			for (size_t i = 0; i < 1U << detail; i++) {
+				delete[] rows[i];
+			}
+		} else {
+			mvt_layer layer;
+			layer.name = layername;
+			layer.version = 2;
+			layer.extent = 1U << detail;
+
+			std::vector<mvt_feature> features;
+			features.resize(levels);
+
+			if (single_polygons) {
+				for (size_t y = 0; y < (1U << detail); y++) {
+					for (size_t x = 0; x < (1U << detail); x++) {
+						if (tile.count[y * (1 << detail) + x] != 0) {
+							mvt_feature feature;
+							feature.type = mvt_polygon;
+
+							feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
+							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
+							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
+							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
+							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+
+							if (include_density) {
+								mvt_value val;
+								val.type = mvt_uint;
+								val.numeric_value.uint_value = normalized[y * (1 << detail) + x];
+								layer.tag(feature, "density", val);
+							}
+
+							if (include_count) {
+								mvt_value val;
+								val.type = mvt_uint;
+								val.numeric_value.uint_value = tile.count[y * (1 << detail) + x];
+								layer.tag(feature, "count", val);
+							}
+
+							layer.features.push_back(feature);
+						}
+					}
+				}
+			} else {
+				for (size_t y = 0; y < (1U << detail); y++) {
+					for (size_t x = 0; x < (1U << detail); x++) {
+						long long density = normalized[y * (1 << detail) + x];
+						if (density != 0) {
+							mvt_feature &feature = features[density];
+							feature.type = mvt_polygon;
+
+							feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
+							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
+							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
+							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
+							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+						}
+					}
+				}
+
+				for (size_t i = first_level; i < features.size(); i++) {
+					if (features[i].geometry.size() != 0) {
+						// features[i].geometry = merge_rings(features[i].geometry);
+
+						long long count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
+						if (count < first_count) {
+							continue;
+						}
 
 						if (include_density) {
 							mvt_value val;
 							val.type = mvt_uint;
-							val.numeric_value.uint_value = normalized[y * (1 << detail) + x];
-							layer.tag(feature, "density", val);
+							val.numeric_value.uint_value = i;
+							layer.tag(features[i], "density", val);
 						}
 
 						if (include_count) {
 							mvt_value val;
 							val.type = mvt_uint;
-							val.numeric_value.uint_value = tile.count[y * (1 << detail) + x];
-							layer.tag(feature, "count", val);
+							val.numeric_value.uint_value = count;
+							layer.tag(features[i], "count", val);
 						}
 
-						layer.features.push_back(feature);
-					}
-				}
-			}
-		} else {
-			for (size_t y = 0; y < (1U << detail); y++) {
-				for (size_t x = 0; x < (1U << detail); x++) {
-					long long density = normalized[y * (1 << detail) + x];
-					if (density != 0) {
-						mvt_feature &feature = features[density];
-						feature.type = mvt_polygon;
-
-						feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
-						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
-						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
-						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
-						feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+						layer.features.push_back(features[i]);
 					}
 				}
 			}
 
-			for (size_t i = first_level; i < features.size(); i++) {
-				if (features[i].geometry.size() != 0) {
-					// features[i].geometry = merge_rings(features[i].geometry);
+			if (layer.features.size() > 0) {
+				mvt_tile mvt;
+				mvt.layers.push_back(layer);
 
-					long long count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
-					if (count < first_count) {
-						continue;
-					}
-
-					if (include_density) {
-						mvt_value val;
-						val.type = mvt_uint;
-						val.numeric_value.uint_value = i;
-						layer.tag(features[i], "density", val);
-					}
-
-					if (include_count) {
-						mvt_value val;
-						val.type = mvt_uint;
-						val.numeric_value.uint_value = count;
-						layer.tag(features[i], "count", val);
-					}
-
-					layer.features.push_back(features[i]);
-				}
+				compressed = mvt.encode();
 			}
 		}
 
-		if (layer.features.size() > 0) {
-			mvt_tile mvt;
-			mvt.layers.push_back(layer);
-
-			compressed = mvt.encode();
+		if (compressed.size() == 0) {
+			return;
 		}
-	}
 
-	if (compressed.size() == 0) {
-		return;
-	}
+		if (compressed.size() > MAX_TILE_SIZE && increment_threshold) {
+			std::vector<long long> vals;
+			for (size_t i = 0; i < tile.count.size(); i++) {
+				if (tile.count[i] > 0) {
+					vals.push_back(tile.count[i]);
+				}
+			}
+			std::sort(vals.begin(), vals.end());
+			ssize_t n = ceil(vals.size() - vals.size() * MAX_TILE_SIZE / compressed.size() * 0.95);
+			if (n >= (ssize_t) vals.size()) {
+				n = vals.size() - 1;
+			}
+			if (n < 0) {
+				n = 0;
+			}
+			thresh = vals[n] + 1;
 
-	if (limit_tile_sizes && compressed.size() > 500000) {
-		fprintf(stderr, "Tile is too big: %zu\n", compressed.size());
-		exit(EXIT_FAILURE);
+			fprintf(stderr, "Raising threshold to %lld for %zu bytes in tile %d/%lld/%lld\n", thresh, compressed.size(), z, tile.x, tile.y);
+			again = true;
+			continue;
+		}
+
+		if (limit_tile_sizes && compressed.size() > MAX_TILE_SIZE) {
+			fprintf(stderr, "Tile is too big: %zu\n", compressed.size());
+			exit(EXIT_FAILURE);
+		}
 	}
 
 	static pthread_mutex_t db_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1161,7 +1197,7 @@ int main(int argc, char **argv) {
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bwc:qn:y:1k")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bwc:qn:y:1kK")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -1193,6 +1229,10 @@ int main(int argc, char **argv) {
 
 		case 'k':
 			limit_tile_sizes = false;
+			break;
+
+		case 'K':
+			increment_threshold = true;
 			break;
 
 		case 'l':
