@@ -104,6 +104,7 @@ instead of merging existing tilesets. The *maxzoom* plus the *detail* always equ
 
 * `-b`: Create PNG raster tiles instead of vectors. If you are not planning to use these tiles with Mapbox GL,
         you will probably also want to specify `-d8` for normal 256x256 web map tile resolution.
+* `-j`: Create JPEG raster tiles instead of vectors.
 * `-c` *rrggbb*: Specify the color to use in raster tiles as a hex color.
 * `-w`: Make tiles for a white background instead of a black background.
 
