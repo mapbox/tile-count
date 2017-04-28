@@ -346,7 +346,7 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 					if (features[i].geometry.size() != 0) {
 						// features[i].geometry = merge_rings(features[i].geometry);
 
-						long long count = exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma);
+						long long count = ceil(exp(log(i) * count_gamma) * zoom_max / exp(log(levels) * count_gamma));
 						if (count < first_count) {
 							continue;
 						}
