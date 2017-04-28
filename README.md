@@ -117,6 +117,25 @@ instead of merging existing tilesets. The *maxzoom* plus the *detail* always equ
 * `-p` *cpus*: Use the specified number of parallel tasks.
 * `-q`: Silence the progress indicator
 
+Relationship between bin size, maxzoom, and detail
+--------------------------------------------------
+
+What exactly the "detail" parameter means is often the source of confusion.
+It is the difference between the maxzoom and the bin size.
+
+So, for example, if you have data with a bin size of 23 and want to
+tile it with a maxzoom of 16, you should specify a detail of 7, because
+16+7=23.
+
+Within each tile, the resolution of the tile is 2^detail, so if you
+specify a detail of 7, each tile will be a 128x128 grid of pixels or
+features, because 2^7=128.
+
+It is often more useful to work backward from the bin size
+to the maxzoom: if you have data with a bin size of 24, and you
+want 256x256 tiles, 2^8=256 so you should specify a detail of 8,
+and the maxzoom will be 16 because 24-8=16.
+
 Internal file format
 --------------------
 
