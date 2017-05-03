@@ -38,6 +38,7 @@ int white = 0;
 bool single_polygons = false;
 bool limit_tile_sizes = true;
 bool increment_threshold = false;
+bool points = false;
 
 bool quiet = false;
 bool include_density = false;
@@ -299,13 +300,20 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 					for (size_t x = 0; x < (1U << detail); x++) {
 						if (tile.count[y * (1 << detail) + x] != 0) {
 							mvt_feature feature;
-							feature.type = mvt_polygon;
+							if (points) {
+								feature.type = mvt_point;
+							} else {
+								feature.type = mvt_polygon;
+							}
 
 							feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
-							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
-							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
-							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
-							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+
+							if (!points) {
+								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
+								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
+								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
+								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+							}
 
 							if (include_density) {
 								mvt_value val;
@@ -331,13 +339,20 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 						long long density = normalized[y * (1 << detail) + x];
 						if (density != 0) {
 							mvt_feature &feature = features[density];
-							feature.type = mvt_polygon;
+							if (points) {
+								feature.type = mvt_point;
+							} else {
+								feature.type = mvt_polygon;
+							}
 
 							feature.geometry.push_back(mvt_geometry(mvt_moveto, x, y));
-							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
-							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
-							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
-							feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+
+							if (!points) {
+								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
+								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
+								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
+								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+							}
 						}
 					}
 				}
@@ -1197,7 +1212,7 @@ int main(int argc, char **argv) {
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bwc:qn:y:1kK")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bwc:qn:y:1kKP")) != -1) {
 		switch (i) {
 		case 'f':
 			force = true;
@@ -1277,6 +1292,10 @@ int main(int argc, char **argv) {
 
 		case 'c':
 			color = strtoul(optarg, NULL, 16);
+			break;
+
+		case 'P':
+			points = true;
 			break;
 
 		case 'w':

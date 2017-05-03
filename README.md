@@ -110,6 +110,7 @@ instead of merging existing tilesets. The *maxzoom* plus the *detail* always equ
 ### Vector tiles
 
 * `-1`: Output an individual polygon for each bin instead of combining them into MultiPolygons.
+* `-P`: Output Points or MultiPoints instead of Polygons or MultiPolygons
 
 ### Tile size
 
