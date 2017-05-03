@@ -84,6 +84,11 @@ test: all
 	tippecanoe-decode tests/tmp/both.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/both.geojson
 	tippecanoe-decode tests/tmp/bitmap-vector.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/bitmap-vector.geojson
 	cmp tests/tmp/both.geojson tests/tmp/bitmap-vector.geojson
+	# Verify round trip between (normalized) polygon vectors and point vectors
+	./tile-count-tile -f -P -o tests/tmp/both-point.mbtiles tests/tmp/both.mbtiles
+	./tile-count-tile -f -o tests/tmp/both-point-poly.mbtiles tests/tmp/both-point.mbtiles
+	tippecanoe-decode tests/tmp/both-point-poly.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/both-point-poly.geojson
+	cmp tests/tmp/both.geojson tests/tmp/both-point-poly.geojson
 	# Verify that absolute threshold works
 	./tile-count-tile -f -1 -M7 -y count -s16 -o tests/tmp/both.mbtiles tests/tmp/both.count
 	tippecanoe-decode tests/tmp/both.mbtiles > tests/tmp/both.geojson
