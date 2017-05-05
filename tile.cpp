@@ -91,65 +91,6 @@ struct tiler {
 	std::string layername;
 };
 
-std::vector<mvt_geometry> merge_rings(std::vector<mvt_geometry> g) {
-	std::multimap<mvt_geometry, mvt_geometry> trimmed;
-
-	for (size_t i = 1; i < g.size(); i++) {
-		if (g[i].op == mvt_lineto) {
-			bool found = false;
-
-			auto r = trimmed.equal_range(g[i]);
-			for (auto a = r.first; a != r.second; a++) {
-				if (a->second == g[i - 1]) {
-					found = true;
-					trimmed.erase(a);
-					break;
-				}
-			}
-
-			if (!found) {
-				trimmed.insert(std::pair<mvt_geometry, mvt_geometry>(g[i - 1], g[i]));
-			}
-		}
-	}
-
-	std::vector<mvt_geometry> out;
-
-	while (trimmed.size() != 0) {
-		auto a = trimmed.begin();
-		mvt_geometry start = a->first;
-		mvt_geometry here = a->second;
-		trimmed.erase(a);
-		out.push_back(mvt_geometry(mvt_moveto, start.x, start.y));
-		out.push_back(mvt_geometry(mvt_lineto, here.x, here.y));
-
-		while (1) {
-			auto there = trimmed.find(here);
-			if (there == trimmed.end()) {
-				fprintf(stderr, "Internal error: no path");
-				for (size_t i = 0; i < g.size(); i++) {
-					if (g[i].op == mvt_moveto) {
-						fprintf(stderr, "\n");
-					}
-					fprintf(stderr, "%d,%d ", g[i].x, g[i].y);
-				}
-				fprintf(stderr, "\n");
-				exit(EXIT_FAILURE);
-			}
-
-			here = there->second;
-			trimmed.erase(there);
-			out.push_back(mvt_geometry(mvt_lineto, here.x, here.y));
-
-			if (here == start) {
-				break;
-			}
-		}
-	}
-
-	return out;
-}
-
 void gather_quantile(tile const &tile, int detail, long long &max) {
 	for (size_t y = 0; y < (1U << detail); y++) {
 		for (size_t x = 0; x < (1U << detail); x++) {
@@ -312,7 +253,7 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
 								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
 								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
-								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+								feature.geometry.push_back(mvt_geometry(mvt_closepath, 0, 0));
 							}
 
 							if (include_density) {
@@ -351,7 +292,7 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 0)));
 								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
 								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
-								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 0)));
+								feature.geometry.push_back(mvt_geometry(mvt_closepath, 0, 0));
 							}
 						}
 					}
