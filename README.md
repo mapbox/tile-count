@@ -9,7 +9,8 @@ Installation
 Tile-count requires sqlite3 and libpng.
 
 ```
-$ sudo apt-get install libsqlite3-dev libpng-dev
+$ sudo apt-get install libsqlite3-dev libpng-dev  # Linux
+$ brew install libpng                             # MacOS
 $ make install
 ```
 
