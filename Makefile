@@ -19,7 +19,7 @@ else
 	FINAL_FLAGS := -g $(WARNING_FLAGS) $(DEBUG_FLAGS)
 endif
 
-PGMS := tile-count-create tile-count-decode tile-count-tile tile-count-merge
+PGMS := tile-count-create tile-count-decode tile-count-tile tile-count-merge tile-count-grep
 
 all: $(PGMS)
 
@@ -44,6 +44,9 @@ tile-count-tile: tippecanoe/projection.o tile.o header.o serial.o tippecanoe/mbt
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread -lpng
 
 tile-count-merge: mergetool.o header.o serial.o merge.o
+	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
+
+tile-count-grep: tippecanoe/projection.o grep.o header.o serial.o jsonpull/jsonpull.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
 -include $(wildcard *.d)
