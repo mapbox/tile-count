@@ -161,9 +161,9 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-        if (zoom != 0) {
-                mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);
-        }
+	if (zoom != 0) {
+		mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);
+	}
 
 	const char *countfname = argv[optind];
 	int fd = open(countfname, O_RDONLY);

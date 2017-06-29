@@ -155,6 +155,14 @@ to the standard output as newline-delimited GeoJSON.
 * `-s` *binsize*: Specify the zoom level tile size for the precision of matching.
 * `-v`: Reverse the sense of matching: Output the GeoJSON objects that *don't* match.
 
+Normalizing densities
+---------------------
+
+    tile-count-normalize -s binsize -o out.count in.count
+
+Finds the densest bin of size *binsize* in `in.count` and writes out a new file `out.count`
+in which the values are scaled up so that all populated bins of this size are equally dense.
+
 Internal file format
 --------------------
 
