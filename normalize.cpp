@@ -65,17 +65,23 @@ void normalize1(unsigned char *map, int zoom, FILE *out, size_t start, size_t en
 
 void normalize(unsigned char *map, size_t size, int zoom, FILE *out, unsigned long long max) {
 	unsigned long long mask = 0;
-	unsigned long long curindex = 0;
-	long long curcount = 0;
 	int oprogress = 0;
+
 	size_t start = 0;
+	unsigned long long starti = 0;
+
+	size_t end = 0;
+	unsigned long long endi = 0;
+
+	unsigned long long bincount = 0;
+	unsigned long long binwidth = 1 << (64 - 2 * zoom);
 
 	if (zoom != 0) {
 		mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);
 	}
 
 	for (size_t i = 0; i < size; i += RECORD_BYTES) {
-		unsigned long long index = read64(map + i) & mask;
+		unsigned long long index = read64(map + i);
 		unsigned long long count = read32(map + i + INDEX_BYTES);
 
 		int progress = 100 * i / size;
@@ -84,15 +90,38 @@ void normalize(unsigned char *map, size_t size, int zoom, FILE *out, unsigned lo
 			oprogress = progress;
 		}
 
-		if (index != curindex) {
-			normalize1(map, zoom, out, start, i, curcount, max);
-
-			curindex = index;
-			curcount = 0;
-			start = i;
+		unsigned long long want_starti = 0;
+		if (index > binwidth) {
+			want_starti = index - binwidth;
+		}
+		unsigned long long want_endi = 0xFFFFFFFFFFFFFFFFULL;
+		if (index < want_endi - binwidth) {
+			want_endi = index + binwidth;
 		}
 
-		curcount += count;
+		while (start < size && starti < want_starti) {
+			unsigned long long ii = read64(map + start);
+			unsigned long long cc = read32(map + start + INDEX_BYTES);
+
+			bincount -= cc;
+			start += RECORD_BYTES;
+			starti = ii;
+		}
+		while (end < size && endi < want_endi) {
+			unsigned long long ii = read64(map + end);
+			unsigned long long cc = read32(map + end + INDEX_BYTES);
+
+			bincount += cc;
+			end += RECORD_BYTES;
+			endi = ii;
+		}
+
+		// printf("%zu %llx (%llx %llx) %zu %llx %zu %llx  %lld  %lld  wid %llx\n", i, index, want_starti, want_endi, start, starti, end, endi, count, bincount, binwidth);
+
+		count *= (double) max / bincount;
+
+		write64(out, index);
+		write32(out, count);
 	}
 }
 
