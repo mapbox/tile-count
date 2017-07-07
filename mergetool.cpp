@@ -73,6 +73,10 @@ int main(int argc, char **argv) {
 		}
 
 		maps[i] = (unsigned char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fds[i], 0);
+		if (maps[i] == MAP_FAILED) {
+			perror(argv[optind + i]);
+			exit(EXIT_FAILURE);
+		}
 
 		if (st.st_size < HEADER_LEN || memcmp(maps[i], header_text, HEADER_LEN) != 0) {
 			fprintf(stderr, "%s:%s: Not a tile-count file\n", argv[0], argv[i + optind]);
