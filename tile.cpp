@@ -89,6 +89,7 @@ struct tiler {
 	size_t shard;
 	size_t cpus;
 	std::string layername;
+	std::map<std::string, layermap_entry> *layermap;
 };
 
 void gather_quantile(tile const &tile, int detail, long long &max) {
@@ -113,7 +114,7 @@ static void fail(png_structp png_ptr, png_const_charp error_msg) {
 	exit(EXIT_FAILURE);
 }
 
-void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_max, std::string const &layername) {
+void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_max, std::string const &layername, std::map<std::string, layermap_entry> *layermap) {
 	long long thresh = first_count;
 	bool again = true;
 	tile tile = otile;
@@ -261,6 +262,13 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 								val.type = mvt_uint;
 								val.numeric_value.uint_value = normalized[y * (1 << detail) + x];
 								layer.tag(feature, "density", val);
+
+								type_and_string attrib;
+								attrib.type = mvt_double;
+								attrib.string = std::to_string(val.numeric_value.uint_value);
+
+								auto fk = layermap->find(layername);
+								add_to_file_keys(fk->second.file_keys, "density", attrib);
 							}
 
 							if (include_count) {
@@ -268,6 +276,13 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 								val.type = mvt_uint;
 								val.numeric_value.uint_value = tile.count[y * (1 << detail) + x];
 								layer.tag(feature, "count", val);
+
+								type_and_string attrib;
+								attrib.type = mvt_double;
+								attrib.string = std::to_string(val.numeric_value.uint_value);
+
+								auto fk = layermap->find(layername);
+								add_to_file_keys(fk->second.file_keys, "count", attrib);
 							}
 
 							layer.features.push_back(feature);
@@ -312,6 +327,13 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 							val.type = mvt_uint;
 							val.numeric_value.uint_value = i;
 							layer.tag(features[i], "density", val);
+
+							type_and_string attrib;
+							attrib.type = mvt_double;
+							attrib.string = std::to_string(val.numeric_value.uint_value);
+
+							auto fk = layermap->find(layername);
+							add_to_file_keys(fk->second.file_keys, "density", attrib);
 						}
 
 						if (include_count) {
@@ -319,6 +341,13 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 							val.type = mvt_uint;
 							val.numeric_value.uint_value = count;
 							layer.tag(features[i], "count", val);
+
+							type_and_string attrib;
+							attrib.type = mvt_double;
+							attrib.string = std::to_string(val.numeric_value.uint_value);
+
+							auto fk = layermap->find(layername);
+							add_to_file_keys(fk->second.file_keys, "count", attrib);
 						}
 
 						layer.features.push_back(features[i]);
@@ -508,7 +537,7 @@ void *run_tile(void *p) {
 						if (t->pass == 0) {
 							gather_quantile(t->tiles[z], t->detail, t->max[z]);
 						} else {
-							make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z], t->layername);
+							make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z], t->layername, t->layermap);
 						}
 					} else {
 						t->partial_tiles.push_back(t->tiles[z]);
@@ -546,7 +575,7 @@ void *run_tile(void *p) {
 				if (t->pass == 0) {
 					gather_quantile(t->tiles[z], t->detail, t->max[z]);
 				} else {
-					make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z], t->layername);
+					make_tile(t->outdb, t->tiles[z], z, t->detail, t->zoom_max[z], t->layername, t->layermap);
 				}
 			} else {
 				t->partial_tiles.push_back(t->tiles[z]);
@@ -643,6 +672,7 @@ struct tile_reader {
 	double density_gamma;
 	std::vector<long long> max_density;
 	std::vector<long long> global_density;
+	std::map<std::string, layermap_entry> *layermap;
 
 	int y() {
 		return (1LL << zoom) - 1 - sorty;
@@ -740,7 +770,7 @@ void *retile(void *v) {
 
 			if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y() || t.count.size() != width * height) {
 				if (t.active) {
-					make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername);
+					make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername, (*queue)[i]->layermap);
 				}
 
 				t.active = true;
@@ -783,7 +813,9 @@ void *retile(void *v) {
 			mvt_tile tile;
 
 			try {
-				if (!tile.decode((*queue)[i]->data)) {
+				bool was_compressed;
+
+				if (!tile.decode((*queue)[i]->data, was_compressed)) {
 					fprintf(stderr, "Couldn't parse tile\n");
 					exit(EXIT_FAILURE);
 				}
@@ -802,7 +834,7 @@ void *retile(void *v) {
 
 				if (!t.active || t.z != (*queue)[i]->zoom || t.x != (*queue)[i]->x || t.y != (*queue)[i]->y() || t.count.size() != extent * extent) {
 					if (t.active) {
-						make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername);
+						make_tile((*queue)[i]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[i]->global_density[t.z], (*queue)[i]->layername, (*queue)[i]->layermap);
 					}
 
 					t.active = true;
@@ -878,18 +910,19 @@ void *retile(void *v) {
 	}
 
 	if (t.active) {
-		make_tile((*queue)[0]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[0]->global_density[t.z], (*queue)[0]->layername);
+		make_tile((*queue)[0]->outdb, t, t.z, log(sqrt(t.count.size())) / log(2), (*queue)[0]->global_density[t.z], (*queue)[0]->layername, (*queue)[0]->layermap);
 	}
 
 	return NULL;
 }
 
-void merge(std::vector<tile_reader> &r, size_t cpus) {
+void merge(std::vector<tile_reader> &r, size_t cpus, std::vector<std::map<std::string, layermap_entry>> &layermaps) {
 	std::vector<std::vector<tile_reader *>> queues;
 	queues.resize(cpus);
 
 	size_t o = 0;
 	for (size_t i = 0; i < r.size(); i++) {
+		r[i].layermap = &layermaps[o];
 		queues[o].push_back(&r[i]);
 
 		if (i + 1 < r.size() && (r[i].x != r[i + 1].x || r[i].y() != r[i + 1].y() || r[i].zoom != r[i + 1].zoom)) {
@@ -933,7 +966,7 @@ std::vector<long long> parse_max_density(const unsigned char *v) {
 	return out;
 }
 
-void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms, std::vector<long long> &zoom_max, double &midlat, double &midlon, double &minlat, double &minlon, double &maxlat, double &maxlon, std::string const &layername) {
+void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms, std::vector<long long> &zoom_max, double &midlat, double &midlon, double &minlat, double &minlon, double &maxlat, double &maxlon, std::string const &layername, std::vector<std::map<std::string, layermap_entry>> &layermaps) {
 	std::vector<tile_reader> readers;
 	size_t total_rows = 0;
 	size_t seq = 0;
@@ -1094,7 +1127,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 		if (to_merge.size() > 50 * cpus) {
 			tile_reader &last = to_merge[to_merge.size() - 1];
 			if (r.x != last.x || r.y() != last.y() || r.zoom != last.zoom) {
-				merge(to_merge, cpus);
+				merge(to_merge, cpus, layermaps);
 				to_merge.clear();
 			}
 		}
@@ -1136,7 +1169,7 @@ void merge_tiles(char **fnames, size_t n, size_t cpus, sqlite3 *outdb, int zooms
 		}
 	}
 
-	merge(to_merge, cpus);
+	merge(to_merge, cpus, layermaps);
 }
 
 int main(int argc, char **argv) {
@@ -1282,6 +1315,18 @@ int main(int argc, char **argv) {
 	std::vector<long long> zoom_max;
 	size_t zooms = 0;
 
+	std::vector<std::map<std::string, layermap_entry>> layermaps;
+	for (size_t cpu = 0; cpu < cpus; cpu++) {
+		layermap_entry lme(0);
+		lme.minzoom = 0;
+		lme.maxzoom = zooms - 1;
+
+		std::map<std::string, layermap_entry> m;
+		m.insert(std::pair<std::string, layermap_entry>(layername, lme));
+
+		layermaps.push_back(m);
+	}
+
 	// Try opening input as mbtiles for retiling.
 	// If that doesn't work, it must be new counts.
 
@@ -1371,6 +1416,7 @@ int main(int argc, char **argv) {
 				tilers[j].pass = pass;
 				tilers[j].zoom_max = zoom_max;
 				tilers[j].layername = layername;
+				tilers[j].layermap = &layermaps[j];
 			}
 
 			size_t records = (st.st_size - HEADER_LEN) / RECORD_BYTES;
@@ -1426,7 +1472,7 @@ int main(int argc, char **argv) {
 				if (pass == 0) {
 					gather_quantile(a->second, detail, tilers[0].max[a->second.z]);
 				} else {
-					make_tile(outdb, a->second, a->second.z, detail, zoom_max[a->second.z], layername);
+					make_tile(outdb, a->second, a->second.z, detail, zoom_max[a->second.z], layername, &layermaps[0]);
 				}
 			}
 
@@ -1475,36 +1521,14 @@ int main(int argc, char **argv) {
 		}
 	} else {
 		fprintf(stderr, "going to merge %zu zoom levels\n", zooms);
-		merge_tiles(argv + optind, argc - optind, cpus, outdb, zooms, zoom_max, midlat, midlon, minlat, minlon, maxlat, maxlon, layername);
+		merge_tiles(argv + optind, argc - optind, cpus, outdb, zooms, zoom_max, midlat, midlon, minlat, minlon, maxlat, maxlon, layername, layermaps);
 	}
 
-	layermap_entry lme(0);
+	std::map<std::string, layermap_entry> lm = merge_layermaps(layermaps);
 
-	if (include_count) {
-		type_and_string tas;
-		tas.type = mvt_double;
-		tas.string = "count";
-		lme.file_keys.insert(tas);
-	}
-
-	if (include_density) {
-		type_and_string tas2;
-		tas2.type = mvt_double;
-		tas2.string = "density";
-		lme.file_keys.insert(tas2);
-	}
-
-	lme.minzoom = 0;
-	lme.maxzoom = zooms - 1;
-
-	std::map<std::string, layermap_entry> lm;
-	if (!bitmap) {
-		lm.insert(std::pair<std::string, layermap_entry>(layername, lme));
-	}
-
-	mbtiles_write_metadata(outdb, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, !bitmap);
+	mbtiles_write_metadata(outdb, NULL, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, !bitmap, outfile);
 
 	write_meta(zoom_max, outdb);
 
-	mbtiles_close(outdb, argv);
+	mbtiles_close(outdb, argv[0]);
 }

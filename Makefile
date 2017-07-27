@@ -40,7 +40,7 @@ tile-count-create: tippecanoe/projection.o create.o header.o serial.o merge.o js
 tile-count-decode: tippecanoe/projection.o decode.o header.o serial.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread
 
-tile-count-tile: tippecanoe/projection.o tile.o header.o serial.o tippecanoe/mbtiles.o tippecanoe/mvt.o
+tile-count-tile: tippecanoe/projection.o tile.o header.o serial.o tippecanoe/mbtiles.o tippecanoe/mvt.o tippecanoe/text.o
 	$(CXX) $(PG) $(LIBS) $(FINAL_FLAGS) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) -lm -lz -lsqlite3 -lpthread -lpng
 
 tile-count-merge: mergetool.o header.o serial.o merge.o
