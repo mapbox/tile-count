@@ -1206,6 +1206,10 @@ int main(int argc, char **argv) {
 
 		case 'p':
 			cpus = atoi(optarg);
+			if (cpus <= 0) {
+				fprintf(stderr, "%s: cpu count %s must be positive\n", argv[0], optarg);
+				exit(EXIT_FAILURE);
+			}
 			break;
 
 		case 'd':
