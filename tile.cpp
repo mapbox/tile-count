@@ -359,7 +359,8 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 				mvt_tile mvt;
 				mvt.layers.push_back(layer);
 
-				compressed = mvt.encode();
+				std::string pbf = mvt.encode();
+				compress(pbf, compressed);
 			}
 		}
 
