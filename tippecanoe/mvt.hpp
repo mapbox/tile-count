@@ -1,3 +1,12 @@
+#ifndef MVT_HPP
+#define MVT_HPP
+
+#include <sqlite3.h>
+#include <string>
+#include <map>
+#include <set>
+#include <vector>
+
 struct mvt_value;
 struct mvt_layer;
 
@@ -91,10 +100,12 @@ struct mvt_tile {
 	std::vector<mvt_layer> layers;
 
 	std::string encode();
-	bool decode(std::string &message);
+	bool decode(std::string &message, bool &was_compressed);
 };
 
 bool is_compressed(std::string const &data);
 int decompress(std::string const &input, std::string &output);
 int compress(std::string const &input, std::string &output);
 int dezig(unsigned n);
+
+#endif
