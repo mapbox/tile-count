@@ -30,6 +30,7 @@ int levels = 50;
 int first_level = 0;
 int first_count = 0;
 double count_gamma = 2.5;
+double brighten = 1;
 
 bool bitmap = false;
 int color = 0x888888;
@@ -149,6 +150,7 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 						tile.count[y * (1 << detail) + x] = 0;
 					}
 				}
+				density *= brighten;
 				if (density > levels - 1) {
 					density = levels - 1;
 				}
@@ -1187,8 +1189,12 @@ int main(int argc, char **argv) {
 	std::string layername = "count";
 
 	int i;
-	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bwc:qn:y:1kKP")) != -1) {
+	while ((i = getopt(argc, argv, "fz:Z:s:a:o:p:d:l:m:M:g:bwc:qn:y:1kKPB:")) != -1) {
 		switch (i) {
+		case 'B':
+			brighten = atof(optarg);
+			break;
+
 		case 'f':
 			force = true;
 			break;
@@ -1362,6 +1368,11 @@ int main(int argc, char **argv) {
 
 		if (maxzoom >= 0) {
 			zooms = maxzoom + 1;
+
+			if (bin >= 0 && zooms != bin - detail + 1) {
+				fprintf(stderr, "%s: maxzoom (%d) doesn't equal bin size (%d) plus detail (%zu)\n", argv[0], maxzoom, bin, detail);
+				exit(EXIT_FAILURE);
+			}
 		} else {
 			if (bin < (signed) (detail + 1)) {
 				fprintf(stderr, "%s: Detail (%zu) too low for bin size (%d)\n", argv[0], detail, bin);
