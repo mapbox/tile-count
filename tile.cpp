@@ -1531,7 +1531,7 @@ int main(int argc, char **argv) {
 
 	std::map<std::string, layermap_entry> lm = merge_layermaps(layermaps);
 
-	mbtiles_write_metadata(outdb, NULL, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, !bitmap, outfile);
+	mbtiles_write_metadata(outdb, NULL, outfile, 0, zooms - 1, minlat, minlon, maxlat, maxlon, midlat, midlon, false, "", lm, !bitmap, outfile, true);
 
 	write_meta(zoom_max, outdb);
 
