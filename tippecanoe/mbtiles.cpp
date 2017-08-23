@@ -85,26 +85,21 @@ void mbtiles_write_tile(sqlite3 *outdb, int z, int tx, int ty, const char *data,
 	}
 }
 
-static void quote(std::string *buf, const char *s) {
-	char tmp[strlen(s) * 8 + 1];
-	char *out = tmp;
-
-	for (; *s != '\0'; s++) {
-		unsigned char ch = (unsigned char) *s;
+static void quote(std::string &buf, std::string const &s) {
+	for (size_t i = 0; i < s.size(); i++) {
+		unsigned char ch = s[i];
 
 		if (ch == '\\' || ch == '\"') {
-			*out++ = '\\';
-			*out++ = ch;
+			buf.push_back('\\');
+			buf.push_back(ch);
 		} else if (ch < ' ') {
-			sprintf(out, "\\u%04x", ch);
-			out = out + strlen(out);
+			char tmp[7];
+			sprintf(tmp, "\\u%04x", ch);
+			buf.append(std::string(tmp));
 		} else {
-			*out++ = ch;
+			buf.push_back(ch);
 		}
 	}
-
-	*out = '\0';
-	buf->append(tmp, strlen(tmp));
 }
 
 void aprintf(std::string *buf, const char *format, ...) {
@@ -142,7 +137,7 @@ bool type_and_string::operator!=(const type_and_string &o) const {
 	return false;
 }
 
-std::string tilestats(std::map<std::string, layermap_entry> const &layermap1) {
+std::string tilestats(std::map<std::string, layermap_entry> const &layermap1, size_t elements) {
 	// Consolidate layers/attributes whose names are truncated
 	std::vector<std::map<std::string, layermap_entry>> lmv;
 	lmv.push_back(layermap1);
@@ -166,7 +161,7 @@ std::string tilestats(std::map<std::string, layermap_entry> const &layermap1) {
 		out.append("\t\t{\n");
 
 		out.append("\t\t\t\"layer\": \"");
-		quote(&out, layer.first.c_str());
+		quote(out, layer.first.c_str());
 		out.append("\",\n");
 
 		out.append("\t\t\t\"count\": ");
@@ -181,7 +176,7 @@ std::string tilestats(std::map<std::string, layermap_entry> const &layermap1) {
 		}
 
 		out.append("\t\t\t\"geometry\": \"");
-		quote(&out, geomtype.c_str());
+		quote(out, geomtype.c_str());
 		out.append("\",\n");
 
 		size_t attrib_count = layer.second.file_keys.size();
@@ -197,7 +192,7 @@ std::string tilestats(std::map<std::string, layermap_entry> const &layermap1) {
 
 		size_t attrs = 0;
 		for (auto attribute : layer.second.file_keys) {
-			if (attrs == 100) {
+			if (attrs == elements) {
 				break;
 			}
 			if (attrs != 0) {
@@ -208,7 +203,7 @@ std::string tilestats(std::map<std::string, layermap_entry> const &layermap1) {
 			out.append("\t\t\t\t{\n");
 
 			out.append("\t\t\t\t\t\"attribute\": \"");
-			quote(&out, attribute.first.c_str());
+			quote(out, attribute.first.c_str());
 			out.append("\",\n");
 
 			size_t val_count = attribute.second.sample_values.size();
@@ -238,30 +233,36 @@ std::string tilestats(std::map<std::string, layermap_entry> const &layermap1) {
 			}
 
 			out.append("\t\t\t\t\t\"type\": \"");
-			quote(&out, type_str.c_str());
+			quote(out, type_str.c_str());
 			out.append("\",\n");
 
 			out.append("\t\t\t\t\t\"values\": [\n");
 
 			size_t vals = 0;
 			for (auto value : attribute.second.sample_values) {
-				if (vals == 100) {
+				if (vals == elements) {
 					break;
 				}
-				if (vals != 0) {
-					out.append(",\n");
-				}
-				vals++;
 
 				if (value.type == mvt_double || value.type == mvt_bool) {
+					if (vals != 0) {
+						out.append(",\n");
+					}
+					vals++;
+
 					out.append("\t\t\t\t\t\t");
 					out.append(value.string);
 				} else {
 					std::string trunc = truncate16(value.string, 256);
 
 					if (trunc.size() == value.string.size()) {
+						if (vals != 0) {
+							out.append(",\n");
+						}
+						vals++;
+
 						out.append("\t\t\t\t\t\t\"");
-						quote(&out, value.string.c_str());
+						quote(out, value.string.c_str());
 						out.append("\"");
 					}
 				}
@@ -304,7 +305,7 @@ std::string tilestats(std::map<std::string, layermap_entry> const &layermap1) {
 	return out2;
 }
 
-void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fname, int minzoom, int maxzoom, double minlat, double minlon, double maxlat, double maxlon, double midlat, double midlon, int forcetable, const char *attribution, std::map<std::string, layermap_entry> const &layermap, bool vector, const char *description) {
+void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fname, int minzoom, int maxzoom, double minlat, double minlon, double maxlat, double maxlon, double midlat, double midlon, int forcetable, const char *attribution, std::map<std::string, layermap_entry> const &layermap, bool vector, const char *description, bool do_tilestats) {
 	char *sql, *err;
 
 	sqlite3 *db = outdb;
@@ -412,57 +413,66 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 	sqlite3_free(sql);
 
 	if (vector) {
-		std::string buf("{");
-		aprintf(&buf, "\"vector_layers\": [ ");
+		size_t elements = 100;
+		std::string buf;
 
-		std::vector<std::string> lnames;
-		for (auto ai = layermap.begin(); ai != layermap.end(); ++ai) {
-			lnames.push_back(ai->first);
-		}
+		{
+			buf = "{";
+			aprintf(&buf, "\"vector_layers\": [ ");
 
-		for (size_t i = 0; i < lnames.size(); i++) {
-			if (i != 0) {
-				aprintf(&buf, ", ");
+			std::vector<std::string> lnames;
+			for (auto ai = layermap.begin(); ai != layermap.end(); ++ai) {
+				lnames.push_back(ai->first);
 			}
 
-			auto fk = layermap.find(lnames[i]);
-			aprintf(&buf, "{ \"id\": \"");
-			quote(&buf, lnames[i].c_str());
-			aprintf(&buf, "\", \"description\": \"\", \"minzoom\": %d, \"maxzoom\": %d, \"fields\": {", fk->second.minzoom, fk->second.maxzoom);
-
-			bool first = true;
-			for (auto j = fk->second.file_keys.begin(); j != fk->second.file_keys.end(); ++j) {
-				if (first) {
-					first = false;
-				} else {
+			for (size_t i = 0; i < lnames.size(); i++) {
+				if (i != 0) {
 					aprintf(&buf, ", ");
 				}
 
-				aprintf(&buf, "\"");
-				quote(&buf, j->first.c_str());
+				auto fk = layermap.find(lnames[i]);
+				aprintf(&buf, "{ \"id\": \"");
+				quote(buf, lnames[i]);
+				aprintf(&buf, "\", \"description\": \"\", \"minzoom\": %d, \"maxzoom\": %d, \"fields\": {", fk->second.minzoom, fk->second.maxzoom);
 
-				int type = 0;
-				for (auto s : j->second.sample_values) {
-					type |= (1 << s.type);
+				bool first = true;
+				for (auto j = fk->second.file_keys.begin(); j != fk->second.file_keys.end(); ++j) {
+					if (first) {
+						first = false;
+					} else {
+						aprintf(&buf, ", ");
+					}
+
+					aprintf(&buf, "\"");
+					quote(buf, j->first.c_str());
+
+					int type = 0;
+					for (auto s : j->second.sample_values) {
+						type |= (1 << s.type);
+					}
+
+					if (type == (1 << mvt_double)) {
+						aprintf(&buf, "\": \"Number\"");
+					} else if (type == (1 << mvt_bool)) {
+						aprintf(&buf, "\": \"Boolean\"");
+					} else if (type == (1 << mvt_string)) {
+						aprintf(&buf, "\": \"String\"");
+					} else {
+						aprintf(&buf, "\": \"Mixed\"");
+					}
 				}
 
-				if (type == (1 << mvt_double)) {
-					aprintf(&buf, "\": \"Number\"");
-				} else if (type == (1 << mvt_bool)) {
-					aprintf(&buf, "\": \"Boolean\"");
-				} else if (type == (1 << mvt_string)) {
-					aprintf(&buf, "\": \"String\"");
-				} else {
-					aprintf(&buf, "\": \"Mixed\"");
-				}
+				aprintf(&buf, "} }");
 			}
 
-			aprintf(&buf, "} }");
-		}
+			aprintf(&buf, " ]");
 
-		aprintf(&buf, " ],");
-		aprintf(&buf, "\"tilestats\": %s", tilestats(layermap).c_str());
-		aprintf(&buf, "}");
+			if (do_tilestats && elements > 0) {
+				aprintf(&buf, ",\"tilestats\": %s", tilestats(layermap, elements).c_str());
+			}
+
+			aprintf(&buf, "}");
+		}
 
 		sql = sqlite3_mprintf("INSERT INTO metadata (name, value) VALUES ('json', %Q);", buf.c_str());
 		if (sqlite3_exec(db, sql, NULL, NULL, &err) != SQLITE_OK) {
@@ -490,8 +500,8 @@ void mbtiles_write_metadata(sqlite3 *outdb, const char *outdir, const char *fnam
 			while (sqlite3_step(stmt) == SQLITE_ROW) {
 				std::string key, value;
 
-				quote(&key, (const char *) sqlite3_column_text(stmt, 0));
-				quote(&value, (const char *) sqlite3_column_text(stmt, 1));
+				quote(key, (const char *) sqlite3_column_text(stmt, 0));
+				quote(value, (const char *) sqlite3_column_text(stmt, 1));
 
 				if (!first) {
 					fprintf(fp, ",\n");
@@ -536,6 +546,10 @@ std::map<std::string, layermap_entry> merge_layermaps(std::vector<std::map<std::
 
 	for (size_t i = 0; i < maps.size(); i++) {
 		for (auto map = maps[i].begin(); map != maps[i].end(); ++map) {
+			if (map->second.points + map->second.lines + map->second.polygons == 0) {
+				continue;
+			}
+
 			std::string layername = map->first;
 			if (trunc) {
 				layername = truncate16(layername, 256);
