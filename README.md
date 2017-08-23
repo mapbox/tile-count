@@ -122,6 +122,7 @@ instead of merging existing tilesets. The *maxzoom* plus the *detail* always equ
 
 * `-p` *cpus*: Use the specified number of parallel tasks.
 * `-q`: Silence the progress indicator
+* `-B` *multiplier*: Multiply the normalized density by the specified *multiplier* to make it brighter or dimmer.
 
 Relationship between bin size, maxzoom, and detail
 --------------------------------------------------
