@@ -11,6 +11,8 @@
 #include "serial.hpp"
 #include "merge.hpp"
 
+void submerge(std::vector<std::string> fnames, int out, const char *argv0, int zoom, int cpus);
+
 bool quiet = false;
 
 void usage(char **argv) {
@@ -86,13 +88,60 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	int nmerges = fnames.size();
+	int out = open(outfile, O_CREAT | O_TRUNC | O_RDWR, 0777);
+	if (out < 0) {
+		perror(outfile);
+		exit(EXIT_FAILURE);
+	}
+
+	submerge(fnames, out, argv[0], zoom, cpus);
+
+	return 0;
+}
+
+#define MAX_MERGE 50
+
+void submerge(std::vector<std::string> fnames, int out, const char *argv0, int zoom, int cpus) {
+	std::vector<std::string> todelete;
+
+	if (fnames.size() > MAX_MERGE) {
+		size_t subs = MAX_MERGE;
+
+		std::vector<std::string> temps;
+		std::vector<int> tempfds;
+		std::vector<std::vector<std::string>> subfnames;
+		for (size_t i = 0; i < subs; i++) {
+			char s[2000] = "/tmp/count.XXXXXX";
+			int fd = mkstemp(s);
+			if (fd < 0) {
+				perror("mkstemp");
+			}
+
+			temps.push_back(s);
+			tempfds.push_back(fd);
+			subfnames.push_back(std::vector<std::string>());
+		}
+
+		for (size_t i = 0; i < fnames.size(); i++) {
+			subfnames[i % subs].push_back(fnames[i]);
+		}
+
+		for (size_t i = 0; i < subs; i++) {
+			submerge(subfnames[i], tempfds[i], argv0, zoom, cpus);
+			// submerge will have closed the temp fds
+		}
+
+		fnames = temps;
+		todelete = temps;
+	}
+
+	size_t nmerges = fnames.size();
 	struct merge merges[nmerges];
 	int fds[nmerges];
 	unsigned char *maps[nmerges];
 	long long to_sort = 0;
 
-	for (i = 0; i < nmerges; i++) {
+	for (size_t i = 0; i < nmerges; i++) {
 		fds[i] = open(fnames[i].c_str(), O_RDONLY);
 		if (fds[i] < 0) {
 			perror(fnames[i].c_str());
@@ -107,12 +156,12 @@ int main(int argc, char **argv) {
 
 		maps[i] = (unsigned char *) mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fds[i], 0);
 		if (maps[i] == MAP_FAILED) {
-			perror(argv[optind + i]);
+			perror(fnames[i].c_str());
 			exit(EXIT_FAILURE);
 		}
 
 		if (st.st_size < HEADER_LEN || memcmp(maps[i], header_text, HEADER_LEN) != 0) {
-			fprintf(stderr, "%s:%s: Not a tile-count file\n", argv[0], fnames[i].c_str());
+			fprintf(stderr, "%s:%s: Not a tile-count file\n", argv0, fnames[i].c_str());
 			exit(EXIT_FAILURE);
 		}
 
@@ -128,12 +177,6 @@ int main(int argc, char **argv) {
 		}
 	}
 
-	int out = open(outfile, O_CREAT | O_TRUNC | O_RDWR, 0777);
-	if (out < 0) {
-		perror(outfile);
-		exit(EXIT_FAILURE);
-	}
-
 	if (write(out, header_text, HEADER_LEN) != HEADER_LEN) {
 		perror("write header");
 		exit(EXIT_FAILURE);
@@ -145,5 +188,10 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	return 0;
+	for (size_t i = 0; i < todelete.size(); i++) {
+		if (unlink(todelete[i].c_str()) < 0) {
+			perror(todelete[i].c_str());
+			exit(EXIT_FAILURE);
+		}
+	}
 }
