@@ -1359,6 +1359,7 @@ int main(int argc, char **argv) {
 	if (zooms == 0) {
 		if (optind + 1 != argc || (maxzoom < 0 && bin < 0) || outfile == NULL) {
 			usage(argv);
+			exit(EXIT_FAILURE);
 		}
 
 		if (maxzoom < 0 && bin < 0) {

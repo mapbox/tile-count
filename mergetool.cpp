@@ -11,7 +11,7 @@
 #include "serial.hpp"
 #include "merge.hpp"
 
-void submerge(std::vector<std::string> fnames, int out, const char *argv0, int zoom, int cpus);
+void submerge(std::vector<std::string> fnames, int out, const char *argv0, int zoom, int cpus, size_t *also_todo, size_t *also_did);
 
 bool quiet = false;
 
@@ -94,14 +94,15 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	submerge(fnames, out, argv[0], zoom, cpus);
+	size_t also_todo = 0, also_did = 0;
+	submerge(fnames, out, argv[0], zoom, cpus, &also_todo, &also_did);
 
 	return 0;
 }
 
 #define MAX_MERGE 50
 
-void submerge(std::vector<std::string> fnames, int out, const char *argv0, int zoom, int cpus) {
+void submerge(std::vector<std::string> fnames, int out, const char *argv0, int zoom, int cpus, size_t *also_todo, size_t *also_did) {
 	std::vector<std::string> todelete;
 
 	if (fnames.size() > MAX_MERGE) {
@@ -124,10 +125,15 @@ void submerge(std::vector<std::string> fnames, int out, const char *argv0, int z
 
 		for (size_t i = 0; i < fnames.size(); i++) {
 			subfnames[i % subs].push_back(fnames[i]);
+
+			struct stat st;
+			if (stat(fnames[i].c_str(), &st) == 0) {
+				*also_todo += st.st_size / RECORD_BYTES;
+			}
 		}
 
 		for (size_t i = 0; i < subs; i++) {
-			submerge(subfnames[i], tempfds[i], argv0, zoom, cpus);
+			submerge(subfnames[i], tempfds[i], argv0, zoom, cpus, also_todo, also_did);
 			// submerge will have closed the temp fds
 		}
 
@@ -182,11 +188,13 @@ void submerge(std::vector<std::string> fnames, int out, const char *argv0, int z
 		exit(EXIT_FAILURE);
 	}
 
-	do_merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom, quiet, cpus);
+	do_merge(merges, nmerges, out, RECORD_BYTES, to_sort / RECORD_BYTES, zoom, quiet, cpus, *also_todo, *also_did);
 	if (close(out) != 0) {
 		perror("close");
 		exit(EXIT_FAILURE);
 	}
+
+	*also_did += to_sort / RECORD_BYTES;
 
 	for (size_t i = 0; i < todelete.size(); i++) {
 		if (unlink(todelete[i].c_str()) < 0) {

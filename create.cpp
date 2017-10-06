@@ -204,7 +204,7 @@ void sort_and_merge(int fd, int out, int zoom, size_t cpus) {
 			merges[i].map = (unsigned char *) map;
 		}
 
-		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom, quiet, cpus);
+		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom, quiet, cpus, 0, 0);
 		munmap(map, st.st_size);
 	}
 }

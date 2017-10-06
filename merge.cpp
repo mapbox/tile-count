@@ -21,7 +21,7 @@ struct merger {
 	}
 };
 
-unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom, bool quiet, volatile int *progress, size_t shard, size_t nshards) {
+unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom, bool quiet, volatile int *progress, size_t shard, size_t nshards, size_t also_todo, size_t also_did) {
 	std::priority_queue<merger> q;
 
 	unsigned long long mask = 0;
@@ -70,7 +70,7 @@ unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned c
 		}
 
 		along++;
-		long long report = 100 * along / nrec;
+		long long report = 100 * (along + also_did) / (nrec + also_todo);
 		if (report != reported) {
 			progress[shard] = report;
 			int sum = 0;
@@ -102,6 +102,8 @@ struct merge_arg {
 	unsigned char *out;
 	int zoom;
 	bool quiet;
+	size_t also_todo;
+	size_t also_did;
 
 	int *progress;
 	size_t shard;
@@ -124,13 +126,13 @@ void *run_merge(void *va) {
 		nrec += (a->mergers[i].end - a->mergers[i].start) / RECORD_BYTES;
 	}
 
-	unsigned char *end = do_merge1(a->mergers, a->mergers.size(), a->out + a->off, RECORD_BYTES, nrec, a->zoom, a->quiet, a->progress, a->shard, a->nshards);
+	unsigned char *end = do_merge1(a->mergers, a->mergers.size(), a->out + a->off, RECORD_BYTES, nrec, a->zoom, a->quiet, a->progress, a->shard, a->nshards, a->also_todo, a->also_did);
 	a->outlen = end - (a->out + a->off);
 
 	return NULL;
 }
 
-void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long nrec, int zoom, bool quiet, size_t cpus) {
+void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long nrec, int zoom, bool quiet, size_t cpus, size_t also_todo, size_t also_did) {
 	unsigned long long mask = 0;
 	if (zoom != 0) {
 		mask = 0xFFFFFFFFFFFFFFFFULL << (64 - 2 * zoom);
@@ -201,6 +203,8 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 		ma.progress = progress;
 		ma.shard = i;
 		ma.nshards = cpus;
+		ma.also_todo = also_todo;
+		ma.also_did = also_did;
 
 		for (size_t j = 0; j < nmerges; j++) {
 			finder *fs = (finder *) (merges[j].map + merges[j].start);
