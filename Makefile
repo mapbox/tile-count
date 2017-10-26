@@ -69,6 +69,15 @@ test: all
 	# Verify merging of .count files
 	./tile-count-merge -s16 -o tests/tmp/merged.count tests/tmp/1.count tests/tmp/2.count
 	cmp tests/tmp/merged.count tests/tmp/both.count
+	# Verify merging of hundreds of .count files
+	./tile-count-decode tests/tmp/merged.count | split -l20 - tests/tmp/split
+	cat tests/tmp/split?? | ./tile-count-create -o tests/tmp/combined.count
+	for i in tests/tmp/split??; do ./tile-count-create -o $$i.count $$i; done
+	./tile-count-merge -o tests/tmp/merged2.count tests/tmp/split*.count
+	cmp tests/tmp/merged2.count tests/tmp/combined.count
+	# Verify merging a list of files from the standard input
+	ls tests/tmp/split*.count | ./tile-count-merge -F -o tests/tmp/merged3.count
+	cmp tests/tmp/merged2.count tests/tmp/merged3.count
 	# Verify merging of vector mbtiles with separate features per bin
 	./tile-count-tile -f -1 -y count -s16 -o tests/tmp/1.mbtiles tests/tmp/1.count
 	./tile-count-tile -f -1 -y count -s16 -o tests/tmp/2.mbtiles tests/tmp/2.count

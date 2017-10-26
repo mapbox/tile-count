@@ -2,9 +2,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <string>
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
+#include "milo/dtoa_milo.h"
 
 void usage(char **argv) {
 	fprintf(stderr, "Usage: %s file.count ...\n", argv[0]);
@@ -55,7 +57,7 @@ int main(int argc, char **argv) {
 
 			double lon, lat;
 			projection->unproject(x, y, 32, &lon, &lat);
-			printf("%f,%f,%llu\n", lon, lat, count);
+			printf("%s,%s,%llu\n", milo::dtoa_milo(lon).c_str(), milo::dtoa_milo(lat).c_str(), count);
 		}
 
 		fclose(f);
