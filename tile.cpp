@@ -287,6 +287,19 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 								add_to_file_keys(fk->second.file_keys, "count", attrib);
 							}
 
+							auto fk = layermap->find(layername);
+							if (points) {
+								fk->second.points++;
+							} else {
+								fk->second.polygons++;
+							}
+							if (z < fk->second.minzoom) {
+								fk->second.minzoom = z;
+							}
+							if (z > fk->second.maxzoom) {
+								fk->second.maxzoom = z;
+							}
+
 							layer.features.push_back(feature);
 						}
 					}
@@ -310,6 +323,19 @@ void make_tile(sqlite3 *outdb, tile &otile, int z, int detail, long long zoom_ma
 								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 1), (y + 1)));
 								feature.geometry.push_back(mvt_geometry(mvt_lineto, (x + 0), (y + 1)));
 								feature.geometry.push_back(mvt_geometry(mvt_closepath, 0, 0));
+							}
+
+							auto fk = layermap->find(layername);
+							if (points) {
+								fk->second.points++;
+							} else {
+								fk->second.polygons++;
+							}
+							if (z < fk->second.minzoom) {
+								fk->second.minzoom = z;
+							}
+							if (z > fk->second.maxzoom) {
+								fk->second.maxzoom = z;
 							}
 						}
 					}
