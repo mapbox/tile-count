@@ -3,7 +3,7 @@
 "density_gamma": "2.5",
 "density_levels": "50",
 "format": "pbf",
-"json": "{\"vector_layers\": [ { \"id\": \"count\", \"description\": \"\", \"minzoom\": 0, \"maxzoom\": 7, \"fields\": {\"density\": \"Number\"} } ],\"tilestats\": {\"layerCount\": 1,\"layers\": [{\"layer\": \"count\",\"count\": 5181,\"geometry\": \"Polygon\",\"attributeCount\": 1,\"attributes\": [{\"attribute\": \"density\",\"count\": 38,\"type\": \"number\",\"values\": [10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,41,42,44,45,46,47,48,49,7,8,9],\"min\": 7.000000,\"max\": 49.000000}]}]}}",
+"json": "{\"vector_layers\": [ { \"id\": \"count\", \"description\": \"\", \"minzoom\": 0, \"maxzoom\": 7, \"fields\": {\"density\": \"Number\"} } ],\"tilestats\": {\"layerCount\": 1,\"layers\": [{\"layer\": \"count\",\"count\": 5181,\"geometry\": \"Polygon\",\"attributeCount\": 1,\"attributes\": [{\"attribute\": \"density\",\"count\": 38,\"type\": \"number\",\"values\": [10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,41,42,44,45,46,47,48,49,7,8,9],\"min\": 7,\"max\": 49}]}]}}",
 "max_density": "2794,2372,2014,1709,1451,1232,1046,888,",
 "maxzoom": "7",
 "minzoom": "0",
