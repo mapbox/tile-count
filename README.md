@@ -44,11 +44,12 @@ summed.
 Merging counts
 --------------
 
-    tile-count-merge [-q] [-s binsize] -o out.count in1.count [in2.count ...]
+    tile-count-merge [-q] [-s binsize] -o out.count [-F] in1.count [in2.count ...]
 
 Produces a new count file from the specified count files, summing the counts for any points
 duplicated between the two.
 
+* `-F`: Read a newline-separated list of files to merge from the standard input
 * `-s` *binsize*: The precision of all locations in the output file will be reduced as specified.
 * `-q`: Silence the progress indicator
 

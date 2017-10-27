@@ -87,15 +87,25 @@ void read_into(FILE *out, FILE *in, const char *fname, long long &seq) {
 	char s[2000];
 	while (fgets(s, 2000, in)) {
 		double lon, lat;
-		unsigned long long count;
+		long long count;
 
 		line++;
-		size_t n = sscanf(s, "%lf,%lf,%llu", &lon, &lat, &count);
+		size_t n = sscanf(s, "%lf,%lf,%lld", &lon, &lat, &count);
 		if (n == 2) {
 			count = 1;
 		} else if (n != 3) {
 			fprintf(stderr, "%s:%zu: Can't understand %s", fname, line, s);
 			continue;
+		}
+
+		if (count < 0) {
+			fprintf(stderr, "%s:%zu: Count is negative in %s\n", fname, line, s);
+			exit(EXIT_FAILURE);
+		}
+
+		if (count > (long long) MAX_COUNT) {
+			fprintf(stderr, "%s:%zu: Count is too large in %s\n", fname, line, s);
+			exit(EXIT_FAILURE);
 		}
 
 		write_point(out, seq, lon, lat, count);
@@ -204,7 +214,7 @@ void sort_and_merge(int fd, int out, int zoom, size_t cpus) {
 			merges[i].map = (unsigned char *) map;
 		}
 
-		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom, quiet, cpus);
+		do_merge(merges, nmerges, out, bytes, to_sort / bytes, zoom, quiet, cpus, 0, 0);
 		munmap(map, st.st_size);
 	}
 }

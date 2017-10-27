@@ -69,6 +69,15 @@ test: all
 	# Verify merging of .count files
 	./tile-count-merge -s16 -o tests/tmp/merged.count tests/tmp/1.count tests/tmp/2.count
 	cmp tests/tmp/merged.count tests/tmp/both.count
+	# Verify merging of hundreds of .count files
+	./tile-count-decode tests/tmp/merged.count | split -l20 - tests/tmp/split
+	cat tests/tmp/split?? | ./tile-count-create -o tests/tmp/combined.count
+	for i in tests/tmp/split??; do ./tile-count-create -o $$i.count $$i; done
+	./tile-count-merge -o tests/tmp/merged2.count tests/tmp/split*.count
+	cmp tests/tmp/merged2.count tests/tmp/combined.count
+	# Verify merging a list of files from the standard input
+	ls tests/tmp/split*.count | ./tile-count-merge -F -o tests/tmp/merged3.count
+	cmp tests/tmp/merged2.count tests/tmp/merged3.count
 	# Verify merging of vector mbtiles with separate features per bin
 	./tile-count-tile -f -1 -y count -s16 -o tests/tmp/1.mbtiles tests/tmp/1.count
 	./tile-count-tile -f -1 -y count -s16 -o tests/tmp/2.mbtiles tests/tmp/2.count
@@ -77,6 +86,7 @@ test: all
 	tippecanoe-decode tests/tmp/both.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"max_density"' -e '"name"' > tests/tmp/both.geojson
 	tippecanoe-decode tests/tmp/merged.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"max_density"' -e '"name"' > tests/tmp/merged.geojson
 	cmp tests/tmp/both.geojson tests/tmp/merged.geojson
+	cmp tests/tmp/both.geojson tests/fixture/both.geojson
 	# Verify round-trip between normalized vectors and bitmaps
 	./tile-count-tile -f -s16 -o tests/tmp/both.mbtiles tests/tmp/both.count
 	./tile-count-tile -f -b -o tests/tmp/bitmap.mbtiles tests/tmp/both.mbtiles
@@ -84,18 +94,22 @@ test: all
 	tippecanoe-decode tests/tmp/both.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/both.geojson
 	tippecanoe-decode tests/tmp/bitmap-vector.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/bitmap-vector.geojson
 	cmp tests/tmp/both.geojson tests/tmp/bitmap-vector.geojson
+	cmp tests/tmp/both.geojson tests/fixture/bitmap-vector.geojson
 	# Verify round trip between (normalized) polygon vectors and point vectors
 	./tile-count-tile -f -P -o tests/tmp/both-point.mbtiles tests/tmp/both.mbtiles
 	./tile-count-tile -f -o tests/tmp/both-point-poly.mbtiles tests/tmp/both-point.mbtiles
 	tippecanoe-decode tests/tmp/both-point-poly.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/both-point-poly.geojson
 	cmp tests/tmp/both.geojson tests/tmp/both-point-poly.geojson
+	cmp tests/tmp/both.geojson tests/fixture/bitmap-vector.geojson
 	# Verify that absolute threshold works
 	./tile-count-tile -f -1 -M7 -y count -s16 -o tests/tmp/both.mbtiles tests/tmp/both.count
 	tippecanoe-decode tests/tmp/both.mbtiles > tests/tmp/both.geojson
+	cmp tests/tmp/both.geojson tests/fixture/thresh.geojson
 	./tests/check-minimum-count.js tests/tmp/both.geojson 7
 	# Verify absolute threshold with multipolygons
 	./tile-count-tile -f -M7 -y count -s16 -o tests/tmp/both.mbtiles tests/tmp/both.count
 	tippecanoe-decode tests/tmp/both.mbtiles > tests/tmp/both.geojson
+	cmp tests/tmp/both.geojson tests/fixture/thresh-mp.geojson
 	./tests/check-minimum-count.js tests/tmp/both.geojson 7
 	# Verify that level thresholds produce the same results with bitmap and vector
 	./tile-count-tile -f -m7 -s16 -o tests/tmp/vector.mbtiles tests/tmp/both.count
@@ -108,4 +122,5 @@ test: all
 	tippecanoe-decode tests/tmp/vector-1-vector.mbtiles | grep -v -e '"bounds"' -e '"center"' -e '"description"' -e '"name"' > tests/tmp/vector-1-vector.geojson
 	cmp tests/tmp/vector.geojson tests/tmp/raster-vector.geojson
 	cmp tests/tmp/vector.geojson tests/tmp/vector-1-vector.geojson
+	cmp tests/tmp/vector.geojson tests/fixture/thresh-1.geojson
 	rm -rf tests/tmp
