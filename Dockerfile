@@ -24,6 +24,7 @@ RUN wget https://github.com/mapbox/tippecanoe/archive/${TIPPECANOE_VERSION}.tar.
     make && \
     make install
 
+RUN curl https://nodejs.org/dist/v4.8.6/node-v4.8.6-linux-x64.tar.gz | tar zxC /usr/local --strip-components=1
 
 # Run the tests
 CMD make test
