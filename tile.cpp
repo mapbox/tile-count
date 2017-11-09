@@ -1356,7 +1356,7 @@ int main(int argc, char **argv) {
 	for (size_t cpu = 0; cpu < cpus; cpu++) {
 		layermap_entry lme(0);
 		lme.minzoom = 0;
-		lme.maxzoom = zooms - 1;
+		lme.maxzoom = 0;
 
 		std::map<std::string, layermap_entry> m;
 		m.insert(std::pair<std::string, layermap_entry>(layername, lme));

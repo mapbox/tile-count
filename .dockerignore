@@ -1,0 +1,5 @@
+# Don't copy Dockerfile or git items
+.gitignore
+.git
+.o
+Dockerfile

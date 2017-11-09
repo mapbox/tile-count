@@ -1,0 +1,90 @@
+language: node_js
+node_js:
+  - "6"
+
+sudo: false
+
+matrix:
+  include:
+    # test on docker+ubuntu
+    - os: linux
+      compiler: clang
+      services:
+       - docker
+      sudo: true
+      dist: trusty
+      env: DOCKERFILE=Dockerfile
+      before_install: []
+      install:
+        - docker build -t tile-count-image -f ${DOCKERFILE} .
+      script:
+        - docker run -it tile-count-image
+    # debug+santizer build
+    - os: linux
+      compiler: clang
+      env: CLANG_VERSION='5.0.0' BUILDTYPE=Debug CC="clang" CXX="clang++" CXXFLAGS="-fsanitize=address,undefined,integer -fsanitize-address-use-after-scope -fno-sanitize-recover=all" CFLAGS="-fsanitize=address,undefined,integer -fsanitize-address-use-after-scope -fno-sanitize-recover=all" LDFLAGS="-fsanitize=address,undefined,integer"
+      addons:
+        apt:
+          sources: ['ubuntu-toolchain-r-test' ]
+          packages: [ 'libstdc++6','libstdc++-5-dev', 'libsqlite3-dev', 'libpng-dev' ]
+    # coverage+debug build
+    - os: linux
+      compiler: clang
+      env: CLANG_VERSION='5.0.0' BUILDTYPE=Debug CC="clang" CXX="clang++" CXXFLAGS="--coverage" CFLAGS="--coverage" LDFLAGS="--coverage"
+      addons:
+        apt:
+          sources: ['ubuntu-toolchain-r-test' ]
+          packages: [ 'libstdc++6','libstdc++-5-dev', 'libsqlite3-dev', 'libpng-dev' ]
+    # release+linux+g++
+    - os: linux
+      compiler: gcc
+      env: BUILDTYPE=Release CC="gcc-4.9" CXX="g++-4.9"
+      addons:
+        apt:
+          sources: ['ubuntu-toolchain-r-test']
+          packages: [ 'g++-4.9', 'libsqlite3-dev', 'libpng-dev' ]
+    # release+linux+clang++
+    - os: linux
+      compiler: clang
+      env: CLANG_VERSION='5.0.0' BUILDTYPE=Release CC="clang" CXX="clang++"
+      addons:
+        apt:
+          sources: ['ubuntu-toolchain-r-test' ]
+          packages: [ 'libstdc++6','libstdc++-5-dev', 'libsqlite3-dev', 'libpng-dev' ]
+    # release+osx
+    - os: osx
+      compiler: clang
+      env: BUILDTYPE=Release
+      before_install:
+        - brew update && brew install libpng || true
+    # debug+osx
+    - os: osx
+      compiler: clang
+      env: BUILDTYPE=Debug
+      before_install:
+        - brew update && brew install libpng || true
+
+install:
+  - DEPS_DIR="${TRAVIS_BUILD_DIR}/deps"
+  - export PATH=${DEPS_DIR}/bin:${PATH} && mkdir -p ${DEPS_DIR}
+  - |
+    if [[ ${CLANG_VERSION:-false} != false ]]; then
+      export CCOMPILER='clang'
+      export CXXCOMPILER='clang++'
+      CLANG_URL="https://mason-binaries.s3.amazonaws.com/${TRAVIS_OS_NAME}-x86_64/clang++/${CLANG_VERSION}.tar.gz"
+      travis_retry wget --quiet -O - ${CLANG_URL} | tar --strip-components=1 -xz -C ${DEPS_DIR}
+    fi
+  - BUILDTYPE=${BUILDTYPE} make -j2
+
+before_script:
+ # tests depend on tippecanoe
+ - export TIPPECANOE_VERSION="1.26.3"
+ - wget https://github.com/mapbox/tippecanoe/archive/${TIPPECANOE_VERSION}.tar.gz
+ - tar -xvf ${TIPPECANOE_VERSION}.tar.gz
+ - cd tippecanoe-${TIPPECANOE_VERSION}
+ - make
+ - export PATH=$(pwd):${PATH}
+ - cd ../
+
+script:
+ - BUILDTYPE=${BUILDTYPE} make test
