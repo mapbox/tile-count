@@ -79,7 +79,7 @@ install:
     if [[ ${CLANG_VERSION:-false} != false ]]; then
       export CCOMPILER='clang'
       export CXXCOMPILER='clang++'
-      CLANG_URL="https://mason-binaries.s3.amazonaws.com/${TRAVIS_OS_NAME}-x86_64/clang/${CLANG_VERSION}.tar.gz"
+      CLANG_URL="https://mason-binaries.s3.amazonaws.com/${TRAVIS_OS_NAME}-x86_64/clang++/${CLANG_VERSION}.tar.gz"
       travis_retry wget --quiet -O - ${CLANG_URL} | tar --strip-components=1 -xz -C ${DEPS_DIR}
     fi
   - BUILDTYPE=${BUILDTYPE} make -j2
