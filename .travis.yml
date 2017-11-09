@@ -64,13 +64,13 @@ matrix:
       compiler: clang
       env: BUILDTYPE=Release
       before_install:
-        - brew install libpng
+        - brew update && brew install libpng || true
     # debug+osx
     - os: osx
       compiler: clang
       env: BUILDTYPE=Debug
       before_install:
-        - brew install libpng
+        - brew update && brew install libpng || true
 
 install:
   - DEPS_DIR="${TRAVIS_BUILD_DIR}/deps"
