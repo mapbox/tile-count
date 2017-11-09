@@ -17,13 +17,12 @@ RUN make \
 
 # Install tippecanoe since the tests depend on it
 ENV TIPPECANOE_VERSION="1.26.3"
-ENV PATH=${WORKDIR}/tippecanoe-${TIPPECANOE_VERSION}:${PATH}
 
 RUN wget https://github.com/mapbox/tippecanoe/archive/${TIPPECANOE_VERSION}.tar.gz  && \
     tar -xvf ${TIPPECANOE_VERSION}.tar.gz && \
     cd tippecanoe-${TIPPECANOE_VERSION} && \
     make && \
-    cd ../
+    make install
 
 
 # Run the tests
