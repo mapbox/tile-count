@@ -84,5 +84,15 @@ install:
     fi
   - BUILDTYPE=${BUILDTYPE} make -j2
 
+before_script:
+ # tests depend on tippecanoe
+ - export TIPPECANOE_VERSION="1.26.3"
+ - wget https://github.com/mapbox/tippecanoe/archive/${TIPPECANOE_VERSION}.tar.gz
+ - tar -xvf ${TIPPECANOE_VERSION}.tar.gz
+ - cd tippecanoe-${TIPPECANOE_VERSION}
+ - make
+ - make install
+ - cd ../
+
 script:
- - BUILDTYPE=${BUILDTYPE} make test;
+ - BUILDTYPE=${BUILDTYPE} make test
