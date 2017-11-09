@@ -19,18 +19,10 @@ matrix:
         - docker build -t tile-count-image -f ${DOCKERFILE} .
       script:
         - docker run -it tile-count-image
-    # debug+integer-santizer build
+    # debug+santizer build
     - os: linux
       compiler: clang
-      env: CLANG_VERSION='5.0.0' BUILDTYPE=Debug CC="clang" CXX="clang++" CXXFLAGS="-fsanitize=undefined,integer" CFLAGS="-fsanitize=undefined,integer" LDFLAGS="-fsanitize=undefined,integer"
-      addons:
-        apt:
-          sources: ['ubuntu-toolchain-r-test' ]
-          packages: [ 'libstdc++6','libstdc++-5-dev', 'libsqlite3-dev', 'libpng-dev' ]
-    # debug+leak+address-sanitizer build
-    - os: linux
-      compiler: clang
-      env: CLANG_VERSION='5.0.0' BUILDTYPE=Debug ASAN_OPTIONS=detect_leaks=1 CC="clang" CXX="clang++" CXXFLAGS="-fsanitize=address" CFLAGS="-fsanitize=address" LDFLAGS="-fsanitize=address"
+      env: CLANG_VERSION='5.0.0' BUILDTYPE=Debug CC="clang" CXX="clang++" CXXFLAGS="-fsanitize=address,undefined,integer -fsanitize-address-use-after-scope -fno-sanitize-recover=all" CFLAGS="-fsanitize=address,undefined,integer -fsanitize-address-use-after-scope -fno-sanitize-recover=all" LDFLAGS="-fsanitize=address,undefined,integer"
       addons:
         apt:
           sources: ['ubuntu-toolchain-r-test' ]
