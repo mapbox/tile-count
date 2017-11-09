@@ -26,7 +26,7 @@ matrix:
       addons:
         apt:
           sources: ['ubuntu-toolchain-r-test' ]
-          packages: [ 'libstdc++6','libstdc++-5-dev' ]
+          packages: [ 'libstdc++6','libstdc++-5-dev', 'libsqlite3-dev', 'libpng-dev' ]
     # debug+leak+address-sanitizer build
     - os: linux
       compiler: clang
@@ -34,7 +34,7 @@ matrix:
       addons:
         apt:
           sources: ['ubuntu-toolchain-r-test' ]
-          packages: [ 'libstdc++6','libstdc++-5-dev' ]
+          packages: [ 'libstdc++6','libstdc++-5-dev', 'libsqlite3-dev', 'libpng-dev' ]
     # coverage+debug build
     - os: linux
       compiler: clang
@@ -42,7 +42,7 @@ matrix:
       addons:
         apt:
           sources: ['ubuntu-toolchain-r-test' ]
-          packages: [ 'libstdc++6','libstdc++-5-dev' ]
+          packages: [ 'libstdc++6','libstdc++-5-dev', 'libsqlite3-dev', 'libpng-dev' ]
     # release+linux+g++
     - os: linux
       compiler: gcc
@@ -50,7 +50,7 @@ matrix:
       addons:
         apt:
           sources: ['ubuntu-toolchain-r-test']
-          packages: [ 'g++-4.9' ]
+          packages: [ 'g++-4.9', 'libsqlite3-dev', 'libpng-dev' ]
     # release+linux+clang++
     - os: linux
       compiler: clang
