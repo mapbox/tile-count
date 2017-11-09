@@ -91,7 +91,7 @@ before_script:
  - tar -xvf ${TIPPECANOE_VERSION}.tar.gz
  - cd tippecanoe-${TIPPECANOE_VERSION}
  - make
- - make install
+ - export PATH=$(pwd):${PATH}
  - cd ../
 
 script:
