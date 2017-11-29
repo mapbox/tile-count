@@ -10,6 +10,7 @@
 #include "merge.hpp"
 #include "header.hpp"
 #include "serial.hpp"
+#include "algorithm_mod.hpp"
 
 struct merger {
 	unsigned char *start;
@@ -214,7 +215,7 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 			unsigned char *p = look.data;
 			write64(&p, beginning[i] & mask);
 
-			finder *l = std::lower_bound(fs, fe, look);
+			finder *l = lower_bound1(fs, fe, look);
 
 			merger m;
 			m.start = (unsigned char *) l;
