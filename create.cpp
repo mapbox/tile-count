@@ -151,6 +151,11 @@ void sort_and_merge(int fd, int out, int zoom, size_t cpus) {
 		exit(EXIT_FAILURE);
 	}
 
+	if (st.st_size % RECORD_BYTES != 0) {
+		fprintf(stderr, "File size not a multiple of record length\n");
+		exit(EXIT_FAILURE);
+	}
+
 	long long to_sort = st.st_size;
 	int bytes = RECORD_BYTES;
 

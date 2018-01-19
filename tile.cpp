@@ -1415,6 +1415,11 @@ int main(int argc, char **argv) {
 			exit(EXIT_FAILURE);
 		}
 
+		if ((st.st_size - HEADER_LEN) % RECORD_BYTES != 0) {
+			fprintf(stderr, "%s: file size not a multiple of record length\n", argv[optind]);
+			exit(EXIT_FAILURE);
+		}
+
 		FILE *fps[cpus];
 		for (size_t j = 0; j < cpus; j++) {
 			fps[j] = fopen(argv[optind], "rb");
