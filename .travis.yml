@@ -22,7 +22,7 @@ matrix:
     # debug+santizer build
     - os: linux
       compiler: clang
-      env: CLANG_VERSION='5.0.0' BUILDTYPE=Debug CC="clang" CXX="clang++" CXXFLAGS="-fsanitize=address,undefined,integer -fsanitize-address-use-after-scope -fno-sanitize-recover=all" CFLAGS="-fsanitize=address,undefined,integer -fsanitize-address-use-after-scope -fno-sanitize-recover=all" LDFLAGS="-fsanitize=address,undefined,integer"
+      env: CLANG_VERSION='3.8.0' BUILDTYPE=Debug CC="clang" CXX="clang++" CXXFLAGS="-fsanitize=address,undefined,integer" CFLAGS="-fsanitize=address,undefined,integer" LDFLAGS="-fsanitize=address,undefined,integer"
       addons:
         apt:
           sources: ['ubuntu-toolchain-r-test' ]
