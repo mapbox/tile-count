@@ -130,6 +130,12 @@ void submerge(std::vector<std::string> fnames, int out, const char *argv0, int z
 			if (stat(fnames[i].c_str(), &st) == 0) {
 				*also_todo += st.st_size / RECORD_BYTES;
 			}
+
+			if ((st.st_size - HEADER_LEN) % RECORD_BYTES != 0) {
+				fprintf(stderr, "%s: file size not a multiple of record length\n", fnames[i].c_str());
+				exit(EXIT_FAILURE);
+			}
+
 		}
 
 		for (size_t i = 0; i < subs; i++) {

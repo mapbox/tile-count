@@ -208,8 +208,18 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 		ma.also_did = also_did;
 
 		for (size_t j = 0; j < nmerges; j++) {
+			if ((merges[j].end - merges[j].start) % sizeof(finder) != 0) {
+				fprintf(stderr, "File size is not a multiple of the count unit\n");
+				exit(EXIT_FAILURE);
+			}
+
 			finder *fs = (finder *) (merges[j].map + merges[j].start);
 			finder *fe = (finder *) (merges[j].map + merges[j].end);
+
+			if (fs > fe) {
+				fprintf(stderr, "Region being merged ends before it begins: %p to %p\n", fs, fe);
+				exit(EXIT_FAILURE);
+			}
 
 			finder look;
 			unsigned char *p = look.data;
