@@ -135,7 +135,6 @@ void submerge(std::vector<std::string> fnames, int out, const char *argv0, int z
 				fprintf(stderr, "%s: file size not a multiple of record length\n", fnames[i].c_str());
 				exit(EXIT_FAILURE);
 			}
-
 		}
 
 		for (size_t i = 0; i < subs; i++) {
