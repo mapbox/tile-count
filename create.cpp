@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
+#include <limits.h>
 #include "tippecanoe/projection.hpp"
 #include "header.hpp"
 #include "serial.hpp"
@@ -31,17 +32,20 @@ void write_point(FILE *out, long long &seq, double lon, double lat, unsigned lon
 
 	long long x, y;
 	projection->project(lon, lat, 32, &x, &y);
-	unsigned long long index = encode(x, y);
 
-	while (count > MAX_COUNT) {
+	if (x >= 0 && y >= 0 && x < (1LL << 32) && y < (1LL << 32)) {
+		unsigned long long index = encode(x, y);
+
+		while (count > MAX_COUNT) {
+			write64(out, index);
+			write32(out, MAX_COUNT);
+
+			count -= MAX_COUNT;
+		}
+
 		write64(out, index);
-		write32(out, MAX_COUNT);
-
-		count -= MAX_COUNT;
+		write32(out, count);
 	}
-
-	write64(out, index);
-	write32(out, count);
 }
 
 void read_json(FILE *out, FILE *in, const char *fname, long long &seq) {
