@@ -17,6 +17,7 @@
 #include <math.h>
 #include <time.h>
 #include <png.h>
+#include <atomic>
 #include "tippecanoe/projection.hpp"
 #include "protozero/varint.hpp"
 #include "protozero/pbf_reader.hpp"
@@ -86,7 +87,7 @@ struct tiler {
 	sqlite3 *outdb;
 	int maxzoom;
 
-	volatile int *progress;
+	std::atomic<int> *progress;
 	size_t shard;
 	size_t cpus;
 	std::string layername;
@@ -1322,6 +1323,7 @@ int main(int argc, char **argv) {
 			break;
 
 		default:
+			fprintf(stderr, "Unknown option -%c\n", i);
 			usage(argv);
 			exit(EXIT_FAILURE);
 		}
@@ -1383,13 +1385,13 @@ int main(int argc, char **argv) {
 	}
 
 	if (zooms == 0) {
-		if (optind + 1 != argc || (maxzoom < 0 && bin < 0) || outfile == NULL) {
-			usage(argv);
+		if (maxzoom < 0 && bin < 0) {
+			fprintf(stderr, "%s: Must specify either maxzoom (-z) or bin size (-s)\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}
 
-		if (maxzoom < 0 && bin < 0) {
-			fprintf(stderr, "%s: Must specify either maxzoom (-z) or bin size (-s)\n", argv[0]);
+		if (optind + 1 != argc || (maxzoom < 0 && bin < 0) || outfile == NULL) {
+			usage(argv);
 			exit(EXIT_FAILURE);
 		}
 
@@ -1440,7 +1442,7 @@ int main(int argc, char **argv) {
 		}
 
 		for (size_t pass = 0; pass < 2; pass++) {
-			volatile int progress[cpus];
+			std::atomic<int> progress[cpus];
 			std::vector<tiler> tilers;
 			tilers.resize(cpus);
 

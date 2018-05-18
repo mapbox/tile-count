@@ -5,6 +5,7 @@
 #include <queue>
 #include <iterator>
 #include <algorithm>
+#include <atomic>
 #include <pthread.h>
 #include <sys/mman.h>
 #include "merge.hpp"
@@ -22,7 +23,7 @@ struct merger {
 	}
 };
 
-unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom, bool quiet, volatile int *progress, size_t shard, size_t nshards, size_t also_todo, size_t also_did) {
+unsigned char *do_merge1(std::vector<merger> &merges, size_t nmerges, unsigned char *f, int bytes, long long nrec, int zoom, bool quiet, std::atomic<int> *progress, size_t shard, size_t nshards, size_t also_todo, size_t also_did) {
 	std::priority_queue<merger> q;
 
 	unsigned long long mask = 0;
@@ -106,7 +107,7 @@ struct merge_arg {
 	size_t also_todo;
 	size_t also_did;
 
-	int *progress;
+	std::atomic<int> *progress;
 	size_t shard;
 	size_t nshards;
 };
@@ -194,7 +195,7 @@ void do_merge(struct merge *merges, size_t nmerges, int f, int bytes, long long 
 		}
 	}
 
-	int progress[cpus];
+	std::atomic<int> progress[cpus];
 	std::vector<merge_arg> args;
 
 	for (size_t i = 0; i < cpus; i++) {
