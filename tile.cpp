@@ -539,9 +539,12 @@ void *run_tile(void *p) {
 
 		for (size_t z = t->minzoom; z < t->zooms; z++) {
 			unsigned tx = wx, ty = wy;
-			if (z + t->detail != 32) {
+			if (z + t->detail < 32) {
 				tx >>= (32 - (z + t->detail));
 				ty >>= (32 - (z + t->detail));
+			} else {
+				tx = 0;
+				ty = 0;
 			}
 
 			unsigned px = tx, py = ty;
@@ -1409,6 +1412,11 @@ int main(int argc, char **argv) {
 			}
 
 			zooms = bin - detail + 1;
+		}
+
+		if (zooms - 1 > 32) {
+			fprintf(stderr, "%s: maxzoom (-z %zu) must be in the range 0 to 32\n", argv[0], zooms - 1);
+			exit(EXIT_FAILURE);
 		}
 
 		struct stat st;

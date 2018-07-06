@@ -74,6 +74,11 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	if (zoom < 0 || zoom > 32) {
+		fprintf(stderr, "%s: zoom (-s) must be in the range 0 to 32, not %d\n", argv[0], zoom);
+		exit(EXIT_FAILURE);
+	}
+
 	std::vector<std::string> fnames;
 	for (i = optind; i < argc; i++) {
 		fnames.push_back(argv[i]);

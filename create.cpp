@@ -266,6 +266,11 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
+	if (zoom < 0 || zoom > 32) {
+		fprintf(stderr, "%s: zoom (-s) must be in the range 0 to 32, not %d\n", argv[0], zoom);
+		exit(EXIT_FAILURE);
+	}
+
 	int fd = open(outfile, O_RDWR | O_CREAT | O_TRUNC, 0777);
 	if (fd < 0) {
 		perror(outfile);
