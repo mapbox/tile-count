@@ -38,7 +38,7 @@ void write32(unsigned char **out, unsigned long long v) {
 	}
 }
 
-unsigned long long read64(unsigned char *c) {
+unsigned long long read64(const unsigned char *c) {
 	unsigned long long out = 0;
 
 	for (ssize_t i = 0; i < 8; i++) {
@@ -48,7 +48,7 @@ unsigned long long read64(unsigned char *c) {
 	return out;
 }
 
-unsigned long long read32(unsigned char *c) {
+unsigned long long read32(const unsigned char *c) {
 	unsigned long long out = 0;
 
 	for (ssize_t i = 0; i < 4; i++) {

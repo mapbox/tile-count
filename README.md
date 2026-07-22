@@ -125,8 +125,7 @@ instead of merging existing tilesets. The *maxzoom* plus the *detail* always equ
 * `-q`: Silence the progress indicator
 * `-B` *multiplier*: Multiply the normalized density by the specified *multiplier* to make it brighter or dimmer.
 
-Relationship between bin size, maxzoom, and detail
---------------------------------------------------
+## Relationship between bin size, maxzoom, and detail
 
 What exactly the "detail" parameter means is often the source of confusion.
 It is the difference between the maxzoom and the bin size.
@@ -143,6 +142,28 @@ It is often more useful to work backward from the bin size
 to the maxzoom: if you have data with a bin size of 24, and you
 want 256x256 tiles, 2^8=256 so you should specify a detail of 8,
 and the maxzoom will be 16 because 24-8=16.
+
+Matching GeoJSON against count files
+------------------------------------
+
+    tile-count-grep [-v] [-s binsize] in.count [file.json ...]
+
+matches GeoJSON objects on the standard input or the specified `.json` files against
+locations in `in.count` and writes the ones that contain a previously counted location
+to the standard output as newline-delimited GeoJSON.
+
+### Options
+
+* `-s` *binsize*: Specify the zoom level tile size for the precision of matching.
+* `-v`: Reverse the sense of matching: Output the GeoJSON objects that *don't* match.
+
+Normalizing densities
+---------------------
+
+    tile-count-normalize -s binsize -o out.count in.count
+
+Finds the densest bin of size *binsize* in `in.count` and writes out a new file `out.count`
+in which the values are scaled up so that all populated bins of this size are equally dense.
 
 Internal file format
 --------------------
